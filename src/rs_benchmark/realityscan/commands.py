@@ -42,4 +42,3 @@ class RealityScanCommandBuilder:
         config: ExperimentConfig,
     ) -> list[str]:
         return [str(executable), *cls.alignment_arguments(image_folder, project_file, config)]
-

@@ -9,4 +9,3 @@ The application uses four primary boundaries:
 
 The GUI must never call `subprocess` directly. `RealityScanControllerProtocol` is the mockable seam
 used by future benchmark orchestration and unit tests.
-

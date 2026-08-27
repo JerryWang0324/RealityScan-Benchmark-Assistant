@@ -38,4 +38,3 @@ class ExperimentConfig:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ExperimentConfig:
         return cls(**data)
-

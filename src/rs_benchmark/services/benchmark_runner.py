@@ -3,4 +3,3 @@
 The runner will depend on ``RealityScanControllerProtocol`` rather than Qt or a
 concrete subprocess implementation, keeping orchestration unit-testable.
 """
-

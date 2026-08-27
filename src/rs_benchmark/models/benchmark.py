@@ -62,4 +62,3 @@ class BenchmarkProject:
             json.dumps(self.to_dict(), indent=2), encoding="utf-8"
         )
         return run_directory
-

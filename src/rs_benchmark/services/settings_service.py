@@ -33,4 +33,3 @@ class SettingsService:
     def save(self, settings: AppSettings) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.path.write_text(json.dumps(asdict(settings), indent=2), encoding="utf-8")
-

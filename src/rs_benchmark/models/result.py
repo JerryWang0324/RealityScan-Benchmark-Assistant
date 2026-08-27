@@ -46,4 +46,3 @@ class ExperimentResult:
         values.pop("registration_rate", None)
         values["status"] = ExperimentStatus(values.get("status", ExperimentStatus.PENDING))
         return cls(**values)
-

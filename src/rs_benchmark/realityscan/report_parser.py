@@ -16,4 +16,3 @@ class ReportParser:
             experiment_name=experiment_name,
             status=ExperimentStatus.SUCCEEDED,
         )
-
