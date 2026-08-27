@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+
+# IDE and operating system
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Local application state and generated artifacts
+config/app_settings.json
+logs/
+benchmark_runs/
+*.rsproj
+*.rcproj
+*.rsalign
+*.rcalign
+*.rscache/
+*.rcache/
+
+# Datasets and binaries
+datasets/
+RealityScan.exe
+RealityCapture.exe
+
