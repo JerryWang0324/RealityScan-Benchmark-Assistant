@@ -8,8 +8,11 @@ from typing import Any
 class ExperimentStatus(StrEnum):
     PENDING = "PENDING"
     RUNNING = "RUNNING"
-    SUCCEEDED = "SUCCEEDED"
+    SUCCESS = "SUCCESS"
+    SUCCEEDED = "SUCCESS"  # Backward-compatible alias from phase one.
     FAILED = "FAILED"
+    TIMEOUT = "TIMEOUT"
+    DRY_RUN = "DRY_RUN"
 
 
 @dataclass(slots=True)
@@ -20,13 +23,23 @@ class ExperimentResult:
     status: ExperimentStatus = ExperimentStatus.PENDING
     total_images: int | None = None
     registered_images: int | None = None
-    number_of_components: int | None = None
+    component_count: int | None = None
     largest_component_camera_count: int | None = None
     sparse_point_count: int | None = None
     mean_reprojection_error: float | None = None
-    alignment_runtime_seconds: float | None = None
+    runtime_seconds: float | None = None
     exit_code: int | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
     error_message: str | None = None
+
+    @property
+    def number_of_components(self) -> int | None:
+        return self.component_count
+
+    @property
+    def alignment_runtime_seconds(self) -> float | None:
+        return self.runtime_seconds
 
     @property
     def registration_rate(self) -> float | None:
@@ -44,5 +57,9 @@ class ExperimentResult:
     def from_dict(cls, data: dict[str, Any]) -> ExperimentResult:
         values = dict(data)
         values.pop("registration_rate", None)
+        if "number_of_components" in values and "component_count" not in values:
+            values["component_count"] = values.pop("number_of_components")
+        if "alignment_runtime_seconds" in values and "runtime_seconds" not in values:
+            values["runtime_seconds"] = values.pop("alignment_runtime_seconds")
         values["status"] = ExperimentStatus(values.get("status", ExperimentStatus.PENDING))
         return cls(**values)

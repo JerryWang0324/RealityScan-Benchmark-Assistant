@@ -6,9 +6,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from .experiment import ExperimentConfig
+from rs_benchmark.realityscan.dataset import SUPPORTED_IMAGE_EXTENSIONS
 
-SUPPORTED_IMAGE_EXTENSIONS = frozenset({".jpg", ".jpeg", ".png", ".tif", ".tiff"})
+from .experiment import ExperimentConfig
 
 
 @dataclass(slots=True)

@@ -1,58 +1,16 @@
 # RealityScan Benchmark Assistant
 
-A Windows desktop application for reproducible RealityScan / RealityCapture alignment experiments.
-It will run the same image dataset with multiple alignment parameter sets, preserve each run's
-inputs and outputs, and compare registration quality and runtime.
+A Windows/PySide6 desktop application for reproducible RealityScan alignment experiments.
 
-> **Project status:** foundation phase. The typed models, official CLI parameter mapping,
-> process-controller boundary, settings persistence, logging, minimal GUI, and unit-test suite are
-> in place. Full RealityScan execution is deliberately not enabled yet.
-
-## Why this project exists
-
-Photogrammetry settings involve trade-offs between registration success, geometric quality, and
-runtime. Manual comparisons are slow and easy to document inconsistently. This tool is designed to
-make those comparisons repeatable and reviewable.
-
-## Current MVP scope
-
-The planned MVP covers RealityScan **Alignment only**. It excludes mesh reconstruction, texture,
-dense point clouds, machine learning, automatic optimization, and a 3D viewer.
-
-The initial parameter model uses the current official RealityScan keys:
-
-| Internal name | RealityScan CLI key | Default |
-| --- | --- | --- |
-| `feature_detection_quality` | `sfmFeatureDetectionQuality` | `High` |
-| `max_features_per_image` | `sfmMaxFeaturesPerImage` | `40000` |
-| `image_overlap` | `sfmImagesOverlap` | `Medium` |
-| `max_feature_reprojection_error` | `sfmMaxFeatureReprojectionError` | `2.0` |
-
-Sources: [RealityScan CLI keys and values](https://rshelp.capturingreality.com/en-US/tutorials/setkeyvaluetable.htm),
-[all CLI commands](https://rshelp.capturingreality.com/en-US/appbasics/allcommands.htm), and
-[alignment examples](https://rshelp.capturingreality.com/en-US/tutorials/commandline_1.htm).
-
-## Architecture
-
-```text
-src/rs_benchmark/
-├── gui/          PySide6 presentation; no subprocess calls
-├── models/       Typed dataclasses and serialization
-├── realityscan/  CLI keys, command builder, controller, parser boundary
-├── services/     Settings now; benchmark orchestration next
-├── reports/      CSV and chart extension points
-└── utils/        Paths and logging configuration
-```
-
-`RealityScanController` is the only layer that invokes a subprocess. Its protocol makes it
-replaceable with a test double, so CI does not require RealityScan. Internal parameter names are
-separate from the official CLI strings, which are centralized in `realityscan/commands.py`.
-
-See [docs/architecture.md](docs/architecture.md) for the dependency boundaries.
+> **Project status:** phase two. A complete, independently callable single-alignment workflow is
+> implemented. Multi-experiment queues, parameter sweeps, comparisons, charts, dense
+> reconstruction, mesh, texture, AI, databases, and cloud integration are intentionally out of
+> scope.
 
 ## Installation
 
-Requirements: Windows 11 and Python 3.12 or newer. RealityScan is not bundled.
+Requirements: Windows 11, Python 3.12+, and a licensed/signed-in RealityScan installation for real
+runs. RealityScan is not bundled.
 
 ```powershell
 py -3.12 -m venv .venv
@@ -61,56 +19,137 @@ python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 ```
 
-Select `RealityScan.exe` (or the legacy `RealityCapture.exe`) from the GUI. Its path is stored in the
-ignored local file `config/app_settings.json`; no machine-specific path is committed.
-
 ## Run the GUI
 
-### Windows 一鍵啟動
-
-在 Windows 檔案總管中雙擊 `run.bat` 即可啟動 GUI。第一次啟動時，腳本可能需要建立
-`.venv` 虛擬環境並下載 runtime dependencies；後續啟動會直接使用既有的 `.venv`，只有在
-必要套件或專案本身無法 import 時才會重新安裝。系統需已安裝 Python 3.12 或更新版本。
-
-以下手動啟動方式仍然保留：
+Double-click `run.bat`, or start it manually:
 
 ```powershell
 python -m rs_benchmark.main
 ```
 
-After editable installation, `rs-benchmark` is also available. Application logs are written to the
-ignored file `logs/app.log`.
+Application logs are written to `logs/app.log`.
 
-## Development
+## Single Alignment Test
+
+1. Select `RealityScan.exe` (legacy `RealityCapture.exe` is also accepted).
+2. Select a folder containing `.jpg`, `.jpeg`, `.png`, `.tif`, or `.tiff` images.
+3. Choose feature detection quality, maximum features per image, image overlap, and maximum
+   reprojection error.
+4. Optionally use **Preview CLI Command** to inspect the exact Windows command line.
+5. Select **Run Single Alignment Test**.
+6. Review the status, registration metrics, error message, and experiment output location.
+
+Execution happens on a Qt worker thread, so the window remains responsive. Basic dataset and
+executable errors are detected before RealityScan is launched.
+
+The same operation is available as a Qt-independent service:
+
+```python
+from rs_benchmark.services.single_experiment_runner import SingleExperimentRunner
+
+result = SingleExperimentRunner().run_experiment(config)
+```
+
+## Dry Run
+
+Enable **Dry Run** before selecting **Run Single Alignment Test**. The application validates the
+dataset and executable, creates an isolated experiment folder, and writes `config.json`,
+`command.txt`, the custom report template, and `result.json`. It does not start RealityScan. A dry
+run result uses status `DRY_RUN`.
+
+## RealityScan CLI Integration
+
+The phase-two command uses an argv list with `shell=False`; paths containing spaces remain single
+arguments. Official commands and raw keys are centralized in `realityscan/commands.py`.
+
+Command chain:
+
+```text
+-headless
+-silent <crash-report-folder>
+-stdConsole
+-newScene
+-addFolder <image-folder>
+-set sfmFeatureDetectionQuality=<High|Normal>
+-set sfmMaxFeaturesPerImage=<integer>
+-set sfmImagesOverlap=<Low|Medium|High>
+-set sfmMaxFeatureReprojectionError=<float>
+-align
+-save <project.rsproj>
+-setMinComponentSize 1
+-exportLatestComponents <components-folder>
+-exportReport <alignment_report.html> <alignment_report_template.html>
+-quit
+```
+
+Official references: [all CLI commands](https://rshelp.capturingreality.com/en-US/appbasics/allcommands.htm),
+[keys and values](https://rshelp.capturingreality.com/en-US/tutorials/setkeyvaluetable.htm),
+[alignment examples](https://rshelp.capturingreality.com/en-US/tutorials/commandline_1.htm), and
+[report variables](https://rshelp.capturingreality.com/en-US/appbasics/reports_fav_components.htm).
+
+RealityScan does not document a CLI version command. The controller reads Windows executable file
+metadata; `None` is stored when reliable metadata is unavailable.
+
+## Metrics
+
+The project writes a minimal custom report template based on official report variables. This avoids
+depending on localized or installation-specific predefined reports.
+
+| Result field | Definition |
+| --- | --- |
+| `total_images` | Preflight count of supported files in the selected folder |
+| `registered_images` | Sum of registered camera counts reported for all components |
+| `registration_rate` | `registered_images / total_images` |
+| `component_count` | RealityScan project component count |
+| `largest_component_camera_count` | Camera count of the largest component |
+| `sparse_point_count` | Registered point count of the largest component |
+| `mean_reprojection_error` | Mean reprojection error of the largest component |
+| `runtime_seconds` | Wall-clock duration of the RealityScan process |
+
+Missing or malformed individual report values remain `None` and appear as `N/A`. An empty or
+unrecognized report makes the experiment fail cleanly and preserves diagnostics.
+
+## Experiment Output Structure
+
+```text
+benchmark_runs/
+└── experiment_YYYYMMDD_HHMMSS_name/
+    ├── config.json
+    ├── command.txt
+    ├── alignment_report_template.html
+    ├── stdout.log
+    ├── stderr.log
+    ├── runtime.json
+    ├── result.json
+    └── realityscan_output/
+        ├── project.rsproj
+        ├── alignment_report.html
+        ├── components/*.rsalign
+        └── crash_reports/
+```
+
+RealityScan creates the project, report, and component files; the application never fabricates
+them. Even a non-zero exit, timeout, process-start error, or parser error leaves `result.json` and
+logs for debugging. Files RealityScan did not successfully export may naturally be absent.
+
+## Tests
 
 ```powershell
 pytest
 ruff check .
 ```
 
-Tests currently cover dataclass serialization, validation, official-key command construction,
-invalid executable handling, incomplete report safety, missing image folders, and reproducible run
-folder creation. They never launch RealityScan.
+Unit tests use mocked/fake controllers and do not require RealityScan. Fixtures under
+`tests/fixtures/` are minimal project-authored report samples, not copied RealityScan reports.
 
-## Known limitations
+## Known Limitations
 
-- Benchmark orchestration and the background `QThread` worker are not implemented.
-- The report parser currently returns optional metrics as `None`; official report export and field
-  mapping must be integrated before parsing real results.
-- Experiment editing, CSV export, result tables, and charts are placeholders.
-- RealityScan version detection and real-process behavior have not been verified on an installed
-  RealityScan system.
-- Image counting is non-recursive in this phase.
-
-## Roadmap
-
-1. Define an official, versioned RealityScan report template and implement parser fixtures.
-2. Add benchmark orchestration with per-experiment artifacts and failure isolation.
-3. Run orchestration in a Qt background worker with progress and cancellation.
-4. Add experiment editing and comparison results.
-5. Export CSV plus registration-rate and runtime charts.
-
-## Repository hygiene
-
-Generated benchmark runs, logs, local settings, datasets, RealityScan binaries, project files, and
-caches are ignored. Never commit private datasets, credentials, or machine-specific absolute paths.
+- Image discovery is intentionally non-recursive, matching the current single-folder workflow.
+- A RealityScan login/license dialog can still require interaction even in headless mode.
+- The custom report template and full command chain require verification against the exact locally
+  installed RealityScan build; unit tests validate our integration boundary, not Epic's binary.
+- Sparse points and reprojection error are defined for the largest component, not aggregated across
+  unrelated components.
+- Cancellation is not implemented; an optional `timeout_seconds` is available in
+  `ExperimentConfig` but is not yet exposed in the GUI.
+- Real RealityScan integration tests are machine-specific and are not part of CI.
