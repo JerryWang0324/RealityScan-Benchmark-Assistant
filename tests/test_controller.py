@@ -18,4 +18,3 @@ def test_wrong_executable_name_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(InvalidExecutableError, match="must be named"):
         RealityScanController(executable).validate_executable()
-

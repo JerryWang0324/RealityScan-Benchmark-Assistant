@@ -20,4 +20,3 @@ def test_experiment_result_round_trip_and_registration_rate() -> None:
 
 def test_registration_rate_is_none_without_total_images() -> None:
     assert ExperimentResult(experiment_name="Empty").registration_rate is None
-

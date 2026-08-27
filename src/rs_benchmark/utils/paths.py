@@ -17,4 +17,3 @@ def log_directory() -> Path:
 
 def benchmark_runs_directory() -> Path:
     return project_root() / "benchmark_runs"
-

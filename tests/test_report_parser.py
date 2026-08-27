@@ -8,4 +8,3 @@ def test_incomplete_report_does_not_crash() -> None:
     assert result.status is ExperimentStatus.SUCCEEDED
     assert result.total_images is None
     assert result.mean_reprojection_error is None
-

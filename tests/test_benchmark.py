@@ -48,4 +48,3 @@ def test_benchmark_folder_creation(tmp_path: Path) -> None:
     assert (run_directory / "experiment_001_default" / "config.json").is_file()
     assert (run_directory / "experiment_001_default" / "realityscan_output").is_dir()
     assert (run_directory / "summary" / "charts").is_dir()
-

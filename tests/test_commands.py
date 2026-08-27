@@ -29,4 +29,3 @@ def test_command_is_an_argument_list_not_a_shell_string() -> None:
 
     assert "folder with spaces" in arguments
     assert all('"' not in argument for argument in arguments)
-

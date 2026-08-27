@@ -25,4 +25,3 @@ def configure_logging(directory: Path | None = None) -> Path:
         root_logger.addHandler(file_handler)
         root_logger.addHandler(console_handler)
     return log_file
-

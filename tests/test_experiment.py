@@ -18,4 +18,3 @@ def test_experiment_config_round_trip() -> None:
 def test_experiment_config_rejects_invalid_values() -> None:
     with pytest.raises(ValueError, match="positive"):
         ExperimentConfig(name="Invalid", max_features_per_image=0)
-
