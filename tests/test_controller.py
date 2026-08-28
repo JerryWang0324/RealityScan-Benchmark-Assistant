@@ -35,6 +35,17 @@ def test_success_and_nonzero_exit_are_results(tmp_path: Path) -> None:
     assert run.call_args.kwargs["errors"] == "replace"
 
 
+def test_environment_overrides_are_merged_for_subprocess(tmp_path: Path) -> None:
+    controller = _controller(tmp_path)
+    with patch("subprocess.run") as run:
+        run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        controller.run_command(["-quit"], environment={"TEMP": "X:\\isolated"})
+
+    environment = run.call_args.kwargs["env"]
+    assert environment["TEMP"] == "X:\\isolated"
+    assert any(key.lower() == "path" for key in environment)
+
+
 def test_timeout_is_captured_not_raised(tmp_path: Path) -> None:
     controller = _controller(tmp_path)
     with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("rs", 1)):

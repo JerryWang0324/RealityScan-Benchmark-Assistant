@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import inspect
 import json
 import logging
+import os
 import re
+import shutil
+import tempfile
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -38,17 +42,64 @@ class SingleExperimentRunner:
         self.parser = parser or ReportParser()
         self.last_experiment_directory: Path | None = None
 
-    def run_experiment(self, config: ExperimentConfig) -> ExperimentResult:
+    def run_experiment(
+        self, config: ExperimentConfig, experiment_directory: Path | None = None
+    ) -> ExperimentResult:
         dataset = validate_dataset(config.image_folder)
         controller = self.controller_factory(config.realityscan_executable)
         controller.validate_executable()
 
-        experiment_directory = self._create_experiment_directory(config)
+        experiment_directory = (
+            self._prepare_experiment_directory(experiment_directory)
+            if experiment_directory is not None
+            else self._create_experiment_directory(config)
+        )
         self.last_experiment_directory = experiment_directory
         output_paths = self._create_output_paths(experiment_directory)
         output_paths.report_template.write_text(ALIGNMENT_REPORT_TEMPLATE, encoding="utf-8")
         self._write_json(experiment_directory / "config.json", config.to_dict())
-        command = build_alignment_command(config, output_paths)
+        staging_directory: Path | None = None
+        cache_directory: Path | None = None
+        cache_environment: dict[str, str] | None = None
+        command_paths = output_paths
+        if not config.dry_run:
+            cache_directory = self._create_ascii_staging_directory("rsba_cache_")
+            cache_environment = {
+                "TEMP": str(cache_directory),
+                "TMP": str(cache_directory),
+            }
+        if not config.dry_run and self._report_paths_require_ascii_staging(output_paths):
+            staging_directory = self._create_ascii_staging_directory()
+            command_paths = AlignmentOutputPaths(
+                project_file=output_paths.project_file,
+                report_file=staging_directory / "alignment_report.html",
+                report_template=staging_directory / "alignment_report_template.html",
+                components_directory=output_paths.components_directory,
+                crash_reports_directory=output_paths.crash_reports_directory,
+            )
+            command_paths.report_template.write_text(
+                ALIGNMENT_REPORT_TEMPLATE, encoding="utf-8"
+            )
+        self._write_json(
+            experiment_directory / "report_export.json",
+            {
+                "used_ascii_staging": staging_directory is not None,
+                "final_report_path": str(output_paths.report_file),
+                "cli_report_path": str(command_paths.report_file),
+            },
+        )
+        self._write_json(
+            experiment_directory / "cache_policy.json",
+            {
+                "strategy": (
+                    "isolated_process_temp" if cache_directory else "not_applied_dry_run"
+                ),
+                "cleared_before_run": cache_directory is not None,
+                "cache_directory": str(cache_directory) if cache_directory else None,
+                "removed_after_run": cache_directory is not None,
+            },
+        )
+        command = build_alignment_command(config, command_paths)
         (experiment_directory / "command.txt").write_text(
             format_command(command) + "\n", encoding="utf-8"
         )
@@ -70,7 +121,9 @@ class SingleExperimentRunner:
         process = None
         result: ExperimentResult
         try:
-            process = controller.run_command(command[1:], config.timeout_seconds)
+            process = self._run_controller(
+                controller, command[1:], config.timeout_seconds, cache_environment
+            )
             stdout_path.write_text(process.stdout, encoding="utf-8")
             stderr_path.write_text(process.stderr, encoding="utf-8")
             if process.timed_out:
@@ -90,6 +143,12 @@ class SingleExperimentRunner:
                     error_message=process_error,
                 )
             else:
+                if staging_directory is not None:
+                    if not command_paths.report_file.is_file():
+                        raise ReportParseError(
+                            f"Unable to read report: {command_paths.report_file}"
+                        )
+                    shutil.copy2(command_paths.report_file, output_paths.report_file)
                 result = self.parser.parse(output_paths.report_file, config.name)
                 result.total_images = dataset.total_images
                 result.runtime_seconds = process.runtime_seconds
@@ -112,6 +171,11 @@ class SingleExperimentRunner:
                 exit_code=process.return_code if process else None,
                 error_message=error_message,
             )
+        finally:
+            if staging_directory is not None:
+                shutil.rmtree(staging_directory, ignore_errors=True)
+            if cache_directory is not None:
+                shutil.rmtree(cache_directory, ignore_errors=True)
 
         finished = datetime.now().astimezone()
         result.started_at = started.isoformat()
@@ -156,6 +220,11 @@ class SingleExperimentRunner:
         return candidate
 
     @staticmethod
+    def _prepare_experiment_directory(directory: Path) -> Path:
+        directory.mkdir(parents=True, exist_ok=False)
+        return directory
+
+    @staticmethod
     def _create_output_paths(experiment_directory: Path) -> AlignmentOutputPaths:
         output = experiment_directory / "realityscan_output"
         components = output / "components"
@@ -169,6 +238,70 @@ class SingleExperimentRunner:
             components_directory=components,
             crash_reports_directory=crash_reports,
         )
+
+    @staticmethod
+    def _report_paths_require_ascii_staging(paths: AlignmentOutputPaths) -> bool:
+        return not (
+            str(paths.report_file).isascii() and str(paths.report_template).isascii()
+        )
+
+    @classmethod
+    def _create_ascii_staging_directory(cls, prefix: str = "rsba_report_") -> Path:
+        candidates = [Path(tempfile.gettempdir())]
+        system_root = os.environ.get("SystemRoot")
+        if system_root:
+            candidates.append(Path(system_root) / "Temp")
+        for candidate in candidates:
+            usable = cls._ascii_or_short_path(candidate)
+            if usable is None or not usable.is_dir():
+                continue
+            try:
+                return Path(tempfile.mkdtemp(prefix=prefix, dir=usable))
+            except OSError:
+                continue
+        raise OSError("Unable to create an ASCII report staging directory")
+
+    @staticmethod
+    def _run_controller(
+        controller: RealityScanControllerProtocol,
+        arguments: list[str],
+        timeout_seconds: float | None,
+        environment: dict[str, str] | None,
+    ):
+        method = controller.run_command
+        try:
+            parameters = inspect.signature(method).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        accepts_environment = "environment" in parameters or any(
+            parameter.kind is inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        )
+        if accepts_environment:
+            return method(arguments, timeout_seconds, environment)
+        return method(arguments, timeout_seconds)
+
+    @staticmethod
+    def _ascii_or_short_path(path: Path) -> Path | None:
+        if str(path).isascii():
+            return path
+        if os.name != "nt":
+            return None
+        try:
+            import ctypes
+
+            size = ctypes.windll.kernel32.GetShortPathNameW(str(path), None, 0)
+            if not size:
+                return None
+            buffer = ctypes.create_unicode_buffer(size)
+            if not ctypes.windll.kernel32.GetShortPathNameW(
+                str(path), buffer, size
+            ):
+                return None
+            short_path = Path(buffer.value)
+            return short_path if str(short_path).isascii() else None
+        except (AttributeError, OSError, ValueError):
+            return None
 
     @staticmethod
     def _write_json(path: Path, data: object) -> None:

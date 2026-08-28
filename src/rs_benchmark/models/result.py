@@ -13,6 +13,8 @@ class ExperimentStatus(StrEnum):
     FAILED = "FAILED"
     TIMEOUT = "TIMEOUT"
     DRY_RUN = "DRY_RUN"
+    SKIPPED = "SKIPPED"
+    CANCELLED = "CANCELLED"
 
 
 @dataclass(slots=True)
@@ -47,16 +49,24 @@ class ExperimentResult:
             return None
         return self.registered_images / self.total_images
 
+    @property
+    def runtime_per_registered_image(self) -> float | None:
+        if not self.registered_images or self.runtime_seconds is None:
+            return None
+        return self.runtime_seconds / self.registered_images
+
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
         data["status"] = self.status.value
         data["registration_rate"] = self.registration_rate
+        data["runtime_per_registered_image"] = self.runtime_per_registered_image
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ExperimentResult:
         values = dict(data)
         values.pop("registration_rate", None)
+        values.pop("runtime_per_registered_image", None)
         if "number_of_components" in values and "component_count" not in values:
             values["component_count"] = values.pop("number_of_components")
         if "alignment_runtime_seconds" in values and "runtime_seconds" not in values:

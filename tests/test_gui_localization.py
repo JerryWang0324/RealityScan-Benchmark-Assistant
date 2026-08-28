@@ -55,6 +55,16 @@ def test_internal_values_use_chinese_display_labels() -> None:
     assert window._config().image_overlap == "Medium"
     assert window.timeout_spin.value() == 60
     assert window._config().timeout_seconds == 3_600
+    assert window.quality_combo.isHidden()
+    assert window.features_spin.isHidden()
+    assert window.overlap_combo.isHidden()
+    assert window.reprojection_spin.isHidden()
+    assert window.timeout_spin.isHidden()
+    assert window.experiment_table.rowCount() == 3
+    assert window.experiment_table.item(0, 1).text() == "預設"
+    window.experiment_table.selectRow(0)
+    window._duplicate_experiment()
+    assert window.experiment_table.item(3, 1).text() == "預設 副本"
     window.close()
     assert app is not None
 

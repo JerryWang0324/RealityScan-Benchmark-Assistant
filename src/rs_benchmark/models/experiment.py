@@ -25,6 +25,7 @@ class ExperimentConfig:
     output_directory: Path = Path("benchmark_runs")
     timeout_seconds: float | None = None
     dry_run: bool = False
+    enabled: bool = True
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -52,7 +53,17 @@ class ExperimentConfig:
             "output_directory": str(self.output_directory),
             "timeout_seconds": self.timeout_seconds,
             "dry_run": self.dry_run,
+            "enabled": self.enabled,
         }
+
+    @property
+    def parameter_signature(self) -> tuple[object, ...]:
+        return (
+            self.feature_detection_quality,
+            self.max_features_per_image,
+            self.image_overlap,
+            self.max_feature_reprojection_error,
+        )
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ExperimentConfig:

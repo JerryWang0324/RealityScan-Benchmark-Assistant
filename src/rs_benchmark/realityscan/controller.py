@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -36,11 +37,17 @@ class RealityScanControllerProtocol(Protocol):
     def get_version(self) -> str | None: ...
 
     def run_command(
-        self, arguments: Sequence[str], timeout_seconds: float | None = None
+        self,
+        arguments: Sequence[str],
+        timeout_seconds: float | None = None,
+        environment: Mapping[str, str] | None = None,
     ) -> ProcessResult: ...
 
     def execute(
-        self, arguments: Sequence[str], timeout_seconds: float | None = None
+        self,
+        arguments: Sequence[str],
+        timeout_seconds: float | None = None,
+        environment: Mapping[str, str] | None = None,
     ) -> ProcessResult: ...
 
 
@@ -96,16 +103,24 @@ class RealityScanController:
             return None
 
     def run_command(
-        self, arguments: Sequence[str], timeout_seconds: float | None = None
+        self,
+        arguments: Sequence[str],
+        timeout_seconds: float | None = None,
+        environment: Mapping[str, str] | None = None,
     ) -> ProcessResult:
         self.validate_executable()
         command = [str(self.executable), *arguments]
         LOGGER.info("Starting RealityScan command with %d arguments", len(arguments))
         started = time.perf_counter()
+        process_environment = None
+        if environment is not None:
+            process_environment = os.environ.copy()
+            process_environment.update(environment)
         try:
             completed = subprocess.run(
                 command, capture_output=True, text=True, check=False,
                 encoding="utf-8", errors="replace", timeout=timeout_seconds, shell=False,
+                env=process_environment,
             )
         except subprocess.TimeoutExpired as exc:
             runtime = time.perf_counter() - started
@@ -136,6 +151,9 @@ class RealityScanController:
         )
 
     def execute(
-        self, arguments: Sequence[str], timeout_seconds: float | None = None
+        self,
+        arguments: Sequence[str],
+        timeout_seconds: float | None = None,
+        environment: Mapping[str, str] | None = None,
     ) -> ProcessResult:
-        return self.run_command(arguments, timeout_seconds)
+        return self.run_command(arguments, timeout_seconds, environment)

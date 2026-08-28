@@ -1,0 +1,4 @@
+experiment_name,status,feature_detection_quality,max_features_per_image,image_overlap,max_feature_reprojection_error,total_images,registered_images,registration_rate,component_count,largest_component_camera_count,sparse_point_count,mean_reprojection_error,runtime_seconds,runtime_per_registered_image
+Default,SUCCESS,High,40000,Medium,2.0,102,96,94.117647,2,94,812345,0.61,182.0,1.8958333333
+High Features,SUCCESS,High,80000,Medium,2.0,100,98,98.0,1,98,1098765,0.58,311.0,3.1734693878
+Strict,SUCCESS,High,40000,High,1.0,107,102,95.327103,1,102,905432,0.49,228.0,2.2352941176

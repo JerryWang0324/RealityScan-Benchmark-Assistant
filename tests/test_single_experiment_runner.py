@@ -21,6 +21,7 @@ class FakeController:
         self.timed_out = timed_out
         self.empty_report = empty_report
         self.was_run = False
+        self.environment: dict[str, str] | None = None
 
     def validate_executable(self) -> None:
         if not self.executable.is_file():
@@ -30,10 +31,14 @@ class FakeController:
         return "1.5-test"
 
     def run_command(
-        self, arguments: list[str], timeout_seconds: float | None = None
+        self,
+        arguments: list[str],
+        timeout_seconds: float | None = None,
+        environment: dict[str, str] | None = None,
     ) -> ProcessResult:
         del timeout_seconds
         self.was_run = True
+        self.environment = environment
         if self.return_code == 0 and not self.timed_out:
             report = Path(arguments[arguments.index("-exportReport") + 1])
             fixture = Path(__file__).parent / "fixtures" / "sample_alignment_report.html"
@@ -75,6 +80,15 @@ def test_success_creates_complete_artifacts(tmp_path: Path) -> None:
     for name in artifact_names:
         assert (directory / name).is_file()
     assert (directory / "realityscan_output" / "alignment_report.html").is_file()
+    assert fake.environment is not None
+    assert fake.environment["TEMP"] == fake.environment["TMP"]
+    assert not Path(fake.environment["TEMP"]).exists()
+    cache_policy = json.loads(
+        (directory / "cache_policy.json").read_text(encoding="utf-8")
+    )
+    assert cache_policy["strategy"] == "isolated_process_temp"
+    assert cache_policy["cleared_before_run"] is True
+    assert cache_policy["removed_after_run"] is True
     saved_result = json.loads((directory / "result.json").read_text(encoding="utf-8"))
     assert saved_result["status"] == "SUCCESS"
 
@@ -149,3 +163,27 @@ def test_empty_report_marks_saved_alignment_as_failed(tmp_path: Path) -> None:
     assert directory is not None
     assert (directory / "realityscan_output" / "project.rsproj").is_file()
     assert (directory / "result.json").is_file()
+
+
+def test_unicode_output_uses_ascii_report_staging_and_copies_report_back(
+    tmp_path: Path,
+) -> None:
+    fake = FakeController(tmp_path / "RealityScan.exe")
+    runner = SingleExperimentRunner(controller_factory=lambda _: fake)
+    config = _config(tmp_path, name="中文實驗", output_directory=tmp_path / "中文輸出")
+
+    result = runner.run_experiment(config)
+    directory = runner.last_experiment_directory
+
+    assert result.status is ExperimentStatus.SUCCESS
+    assert directory is not None
+    final_report = directory / "realityscan_output" / "alignment_report.html"
+    assert final_report.is_file()
+    metadata = json.loads(
+        (directory / "report_export.json").read_text(encoding="utf-8")
+    )
+    assert metadata["used_ascii_staging"] is True
+    assert Path(metadata["final_report_path"]) == final_report
+    assert str(metadata["cli_report_path"]).isascii()
+    command = (directory / "command.txt").read_text(encoding="utf-8")
+    assert metadata["cli_report_path"] in command
