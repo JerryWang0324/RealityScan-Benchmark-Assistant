@@ -103,7 +103,7 @@ class BenchmarkProject:
             stat = image.stat()
             relative = image.relative_to(self.image_folder).as_posix()
             digest.update(f"{relative}\0{stat.st_size}\0{stat.st_mtime_ns}\n".encode())
-        self.metadata = {
+        self.metadata.update({
             "operating_system": platform.platform(),
             "python_version": platform.python_version(),
             "realityscan_version": realityscan_version,
@@ -112,7 +112,7 @@ class BenchmarkProject:
             "dataset_fingerprint": f"sha256:{digest.hexdigest()}",
             "cache_policy": "isolated_process_temp_per_experiment",
             "start_time": self.started_at.isoformat() if self.started_at else None,
-        }
+        })
         return self.metadata
 
     def to_dict(self) -> dict[str, Any]:
@@ -179,7 +179,7 @@ class BenchmarkProject:
         experiments_root = candidate / "experiments"
         experiments_root.mkdir()
         for index, experiment in enumerate(self.enabled_experiments, start=1):
-            directory = experiments_root / f"{index:03d}_{_slug(experiment.name)}"
+            directory = experiments_root / f"{index:03d}_{experiment.experiment_id}"
             (directory / "realityscan_output").mkdir(parents=True)
             (directory / "config.json").write_text(
                 json.dumps(experiment.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"

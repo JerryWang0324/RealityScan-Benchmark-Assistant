@@ -34,6 +34,7 @@ class ExperimentResult:
     started_at: str | None = None
     finished_at: str | None = None
     error_message: str | None = None
+    experiment_id: str | None = None
 
     @property
     def number_of_components(self) -> int | None:

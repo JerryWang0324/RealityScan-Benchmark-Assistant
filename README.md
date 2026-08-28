@@ -3,9 +3,9 @@
 A Windows/PySide6 desktop application for reproducible, multi-experiment RealityScan alignment
 benchmarks.
 
-> **Project status:** Phase 3. The application runs an ordered queue of alignment experiments on one
-> shared dataset, isolates individual failures, aggregates metrics, and writes CSV, JSON, and PNG
-> reports. Parameter sweeps, automatic optimization, dense reconstruction, mesh/texture benchmarks,
+> **Project status:** Phase 4. The application designs Full Factorial and One Factor At A Time
+> parameter sweeps, previews and saves them, then runs generated experiments through the existing
+> isolated alignment queue. Automatic optimization, dense reconstruction, mesh/texture benchmarks,
 > AI recommendations, cloud services, and databases remain intentionally out of scope.
 
 ## Installation
@@ -64,6 +64,75 @@ Presets are hypotheses and convenient starting values, not claims about quality.
 independent copy so one parameter can be varied. Disabled rows are saved but not executed. Identical
 enabled parameter sets produce a warning and remain runnable.
 
+## Parameter Sweep
+
+Choose **Generate Parameter Sweep** to create a reproducible design without manually adding every
+row. The dialog uses the same centralized RealityScan parameter schema as `ExperimentConfig` and the
+CLI command builder. UI labels remain Traditional Chinese while official CLI values remain unchanged
+internally.
+
+- **Full Factorial** creates the Cartesian product of every selected value and is useful for observing
+  parameter combinations.
+- **One Factor At A Time (OFAT)** starts with an explicit baseline, then changes one parameter at a
+  time while all others stay fixed. This makes individual descriptive effects easier to interpret.
+
+```text
+Feature quality: High
+Features: 20,000 / 40,000 / 80,000
+Overlap: Medium / High
+Reprojection: 1.0 / 2.0
+
+1 × 3 × 2 × 2 = 12 experiments
+```
+
+The count and relative workload update immediately. More than 20 experiments displays a warning;
+more than 50 requires confirmation. These soft limits do not prohibit large sweeps. Preview the full
+table before adding it. Generated rows remain editable, disableable, duplicable, reorderable, and
+deletable through the regular experiment table.
+
+Exact duplicates are detected by the four alignment parameter values. The default is to skip them;
+the user may add them anyway or cancel. Every accepted sweep is saved under `sweeps/<sweep_id>.json`
+in the selected output root and copied into the benchmark run. Definitions contain no dataset path,
+so the same design can be reused for another dataset through the model API.
+
+```text
+ParameterSweepConfig
+        ↓
+ExperimentGenerator
+        ↓
+List[ExperimentConfig]
+        ↓
+BenchmarkProject
+        ↓
+BenchmarkRunner → SingleExperimentRunner → RealityScanController
+```
+
+`ExperimentGenerator` is a pure Cartesian/OFAT generator and never invokes RealityScan. Each
+experiment has a stable `exp_<random>` ID for folders and result mapping, a readable name such as
+`High | 20k | Medium | 1.0px`, and a deterministic machine name such as
+`QHigh_F20000_OMedium_R1.0`. Metadata records its sweep ID, mode, generation time, baseline, varied
+parameters, and `MANUAL`, `SWEEP`, or `BASELINE` role.
+
+```json
+{
+  "sweep_id": "sweep_a31f2c9d10",
+  "mode": "full_factorial",
+  "parameters": {
+    "feature_detection_quality": ["High"],
+    "max_features_per_image": [20000, 40000, 80000],
+    "image_overlap": ["Medium", "High"],
+    "max_feature_reprojection_error": [1.0, 2.0]
+  },
+  "baseline": null,
+  "experiment_ids": ["exp_..."],
+  "varied_parameters": [
+    "max_features_per_image",
+    "image_overlap",
+    "max_feature_reprojection_error"
+  ]
+}
+```
+
 ## Running a Benchmark
 
 1. Select the shared image folder and RealityScan executable.
@@ -106,6 +175,13 @@ The descriptive comparison can identify:
 
 It deliberately does not calculate or claim a “best overall” configuration.
 
+For a sweep in which exactly one parameter varies, reports also include line charts for every metric
+with at least two valid values: parameter versus registration rate, runtime, reported mean
+reprojection error, and sparse point count. Multi-parameter sweeps remain grouped through Source and
+Sweep ID in `results.csv` instead of forcing a misleading 3D visualization. OFAT summary JSON records
+registration-rate difference in percentage points, runtime difference and ratio, reported
+reprojection-error difference, and sparse-point difference relative to its baseline.
+
 ### Mock result
 
 ```text
@@ -131,6 +207,8 @@ benchmark_runs/
 └── building_test_20260828_153000/
     ├── benchmark.json
     ├── benchmark.log
+    ├── sweeps/
+    │   └── sweep_a31f2c9d10.json
     ├── experiments/
     │   ├── 001_default/
     │   │   ├── config.json
@@ -152,7 +230,8 @@ benchmark_runs/
             ├── registration_rate.png
             ├── runtime.png
             ├── mean_reprojection_error.png
-            └── sparse_point_count.png
+            ├── sparse_point_count.png
+            └── sweep_a31f2c9d10_max_features_per_image_registration_rate.png
 ```
 
 Reprojection-error charts require at least two valid values. Sparse-point and other charts are not
@@ -184,7 +263,10 @@ remains `null`.
 
 | Field | Meaning |
 | --- | --- |
+| `experiment_id` | Stable identity independent of the display name |
 | `experiment_name` | Experiment display name |
+| `source` | `MANUAL`, `SWEEP`, or `BASELINE` |
+| `sweep_id` | Sweep grouping identity, or `N/A` for manual rows |
 | `status` | `SUCCESS`, `FAILED`, `TIMEOUT`, `DRY_RUN`, `SKIPPED`, or `CANCELLED` |
 | `feature_detection_quality` | RealityScan value (`High` or `Normal`) |
 | `max_features_per_image` | Maximum detected features per input image |
@@ -207,14 +289,16 @@ sparse-point, and mean reprojection-error fields. Registration rate and runtime 
 are derived only when their denominators are greater than zero. A missing report variable, failed
 process, skipped row, or dry run can leave metrics as `N/A`.
 
-## Scientific Limitations
+## Interpreting Results and Scientific Limitations
 
-- These metrics are indirect quality indicators and support descriptive comparison only.
+- Correlation does not imply geometric accuracy; these metrics support descriptive comparison only.
+- A higher registration rate does not necessarily mean a more accurate reconstruction.
+- Lower reported reprojection error does not imply lower absolute 3D error.
 - More sparse points do not necessarily mean a more accurate or useful model.
-- Lower reported reprojection error alone does not guarantee better geometric accuracy.
-- Registration rate does not measure absolute position or scale accuracy.
-- True accuracy evaluation requires ground truth, control points, scale constraints, or independent
-  survey measurements.
+- Sweep observations apply only to the tested dataset, RealityScan version, hardware, and workflow.
+- RealityScan internal metrics are not substitutes for independent ground truth. True accuracy
+  evaluation requires control points, scale constraints, surveyed reference geometry, or other
+  independent measurements.
 - Sparse-point and reprojection-error values describe the largest component rather than aggregating
   unrelated components.
 
@@ -239,7 +323,10 @@ ruff check .
 ```
 
 Unit tests use fake controllers and fake single-experiment runners; they never require RealityScan.
-They cover model serialization, queue order, three successes, failure isolation, stop-on-failure,
+They cover sweep serialization and validation, 12-case Cartesian generation, OFAT isolation,
+duplicate detection, deterministic naming and unique IDs, baseline-relative metrics,
+single-variable charts, Traditional Chinese live counts, model serialization, queue order,
+failure isolation, stop-on-failure,
 cooperative cancellation, disabled rows, CSV encoding/missing values, conditional chart creation,
 comparison helpers, report parsing, command construction, and Traditional Chinese GUI text.
 
@@ -248,6 +335,8 @@ The opt-in real tests under `integration_tests/` are skipped unless explicitly e
 - `RSBA_RUN_REALITYSCAN_INTEGRATION=1` verifies report-only export from an existing project.
 - `RSBA_RUN_REALITYSCAN_BENCHMARK_INTEGRATION=1` plus
   `RSBA_INTEGRATION_IMAGE_FOLDER` runs two complete alignment experiments and checks CSV/charts.
+- `RSBA_RUN_REALITYSCAN_SWEEP_INTEGRATION=1` runs a 20k/40k/80k feature sweep and verifies its
+  result CSV and parameter-effect chart.
 
 Both require `RSBA_INTEGRATION_EXECUTABLE` and a dedicated
 `RSBA_INTEGRATION_OUTPUT_DIRECTORY`. Ordinary `pytest` never launches RealityScan.
@@ -262,4 +351,9 @@ Both require `RSBA_INTEGRATION_EXECUTABLE` and a dedicated
   opt-in integration test before long benchmarks.
 - Reopening a project is supported by the model/API; the current GUI does not yet include an Open
   Project command.
-- Parameter Cartesian products and automatic parameter recommendations are not implemented.
+- Loading a saved sweep through the GUI is not yet exposed. Save/load is available through
+  `SweepDefinition`, and every GUI-created definition is saved automatically.
+- Multi-parameter Full Factorial results use grouped CSV data and standard per-experiment charts;
+  the application intentionally avoids hard-to-read 3D surfaces.
+- No overall winner or automatic “best settings” recommendation is produced because metrics may
+  conflict.

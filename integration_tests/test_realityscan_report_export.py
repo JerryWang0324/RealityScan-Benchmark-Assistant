@@ -6,12 +6,18 @@ from pathlib import Path
 
 import pytest
 
-from rs_benchmark.models import BenchmarkProject, ExperimentConfig, ExperimentStatus
+from rs_benchmark.models import (
+    BenchmarkProject,
+    ExperimentConfig,
+    ExperimentStatus,
+    ParameterSweepConfig,
+)
 from rs_benchmark.realityscan.commands import build_report_export_command, format_command
 from rs_benchmark.realityscan.controller import RealityScanController
 from rs_benchmark.realityscan.report_parser import ReportParser
 from rs_benchmark.realityscan.report_template import ALIGNMENT_REPORT_TEMPLATE
 from rs_benchmark.services.benchmark_runner import BenchmarkRunner
+from rs_benchmark.services.experiment_generator import ExperimentGenerator
 from rs_benchmark.services.single_experiment_runner import SingleExperimentRunner
 
 pytestmark = pytest.mark.integration
@@ -133,3 +139,37 @@ def test_single_experiment_uses_cold_isolated_cache() -> None:
     )
     assert policy["strategy"] == "isolated_process_temp"
     assert not Path(policy["cache_directory"]).exists()
+
+
+def test_three_experiment_feature_sweep() -> None:
+    if os.environ.get("RSBA_RUN_REALITYSCAN_SWEEP_INTEGRATION") != "1":
+        pytest.skip("Set RSBA_RUN_REALITYSCAN_SWEEP_INTEGRATION=1 to run three alignments")
+    executable = _required_path("RSBA_INTEGRATION_EXECUTABLE")
+    images = _required_path("RSBA_INTEGRATION_IMAGE_FOLDER")
+    output = _required_path("RSBA_INTEGRATION_OUTPUT_DIRECTORY")
+    sweep = ParameterSweepConfig(
+        feature_detection_qualities=["High"],
+        max_features_per_image=[20_000, 40_000, 80_000],
+        image_overlaps=["Medium"],
+        max_feature_reprojection_errors=[2.0],
+    )
+    generator = ExperimentGenerator()
+    experiments = generator.generate(sweep)
+    definition = generator.definition(sweep, experiments)
+    project = BenchmarkProject(
+        name="integration_feature_sweep",
+        image_folder=images,
+        realityscan_executable=executable,
+        output_directory=output,
+        experiments=experiments,
+        metadata={"sweep_definitions": [definition.to_dict()]},
+    )
+
+    completed = BenchmarkRunner().run_benchmark(project)
+
+    assert len(completed.results) == 3
+    assert completed.run_directory is not None
+    assert (completed.run_directory / "summary" / "results.csv").is_file()
+    charts = completed.run_directory / "summary" / "charts"
+    assert list(charts.glob("*max_features_per_image_registration_rate.png"))
+    assert (completed.run_directory / "sweeps" / f"{sweep.sweep_id}.json").is_file()

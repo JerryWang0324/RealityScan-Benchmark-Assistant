@@ -38,10 +38,21 @@ from rs_benchmark.gui.localization import (
     localize_error_message,
     status_label,
 )
+from rs_benchmark.gui.sweep_dialog import ParameterSweepDialog, SweepPreviewDialog
 from rs_benchmark.gui.workers import BenchmarkWorker
-from rs_benchmark.models import BenchmarkProject, ExperimentConfig, ExperimentResult
+from rs_benchmark.models import (
+    SWEEP_CONFIRM_THRESHOLD,
+    BenchmarkProject,
+    ExperimentConfig,
+    ExperimentResult,
+)
 from rs_benchmark.realityscan.dataset import validate_dataset
 from rs_benchmark.services.benchmark_runner import BenchmarkProgress
+from rs_benchmark.services.experiment_generator import (
+    ExperimentGenerator,
+    duplicate_with_new_id,
+    partition_duplicates,
+)
 from rs_benchmark.services.settings_service import AppSettings, SettingsService
 from rs_benchmark.services.single_experiment_runner import SingleExperimentRunner
 from rs_benchmark.utils.paths import benchmark_runs_directory
@@ -69,6 +80,7 @@ class MainWindow(QMainWindow):
         self.current_project: BenchmarkProject | None = None
         self._close_when_finished = False
         self._elapsed = QElapsedTimer()
+        self.sweep_definitions: list[dict[str, object]] = []
         self._elapsed_timer = QTimer(self)
         self._elapsed_timer.timeout.connect(self._update_elapsed)
         self._build_ui()
@@ -152,6 +164,7 @@ class MainWindow(QMainWindow):
         buttons = QHBoxLayout()
         actions = (
             ("新增實驗", self._add_experiment),
+            ("產生參數掃描", self._generate_parameter_sweep),
             ("編輯", self._edit_experiment),
             ("複製", self._duplicate_experiment),
             ("刪除", self._delete_experiment),
@@ -204,10 +217,10 @@ class MainWindow(QMainWindow):
     def _results_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        self.result_table = QTableWidget(0, 9)
+        self.result_table = QTableWidget(0, 11)
         self.result_table.setHorizontalHeaderLabels(
             (
-                "實驗", "狀態", "已註冊", "註冊率", "元件數", "最大元件",
+                "實驗", "來源", "掃描 ID", "狀態", "已註冊", "註冊率", "元件數", "最大元件",
                 "稀疏點數", "重投影誤差", "執行時間",
             )
         )
@@ -349,7 +362,7 @@ class MainWindow(QMainWindow):
         if row < 0:
             return
         source = self._experiments()[row]
-        self._append_experiment(replace(source, name=f"{source.name} 副本"))
+        self._append_experiment(duplicate_with_new_id(source))
         self.experiment_table.selectRow(self.experiment_table.rowCount() - 1)
 
     def _delete_experiment(self) -> None:
@@ -384,6 +397,62 @@ class MainWindow(QMainWindow):
             experiments=self._experiments(),
             stop_on_failure=self.stop_failure_check.isChecked(),
             dry_run=self.dry_run_check.isChecked(),
+            metadata={"sweep_definitions": list(self.sweep_definitions)},
+        )
+
+    def _generate_parameter_sweep(self) -> None:
+        dialog = ParameterSweepDialog(self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        try:
+            sweep_config = dialog.sweep_config()
+            experiments = ExperimentGenerator().generate(sweep_config)
+        except ValueError as exc:
+            QMessageBox.warning(self, "參數掃描設定無效", localize_error_message(str(exc)))
+            return
+        if len(experiments) > SWEEP_CONFIRM_THRESHOLD:
+            answer = QMessageBox.question(
+                self,
+                "確認大量實驗",
+                f"此參數掃描將產生 {len(experiments)} 個實驗，確定要繼續預覽嗎？",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        preview = SweepPreviewDialog(experiments, sweep_config, self)
+        if preview.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        unique, duplicates = partition_duplicates(experiments, self._experiments())
+        selected = unique
+        if duplicates:
+            message = QMessageBox(self)
+            message.setWindowTitle("偵測到重複實驗")
+            message.setText(f"有 {len(duplicates)} 個產生的實驗已存在。")
+            message.setInformativeText("請選擇如何處理參數完全相同的實驗。")
+            skip_button = message.addButton("略過重複項目", QMessageBox.ButtonRole.AcceptRole)
+            add_button = message.addButton("仍然加入", QMessageBox.ButtonRole.ActionRole)
+            cancel_button = message.addButton("取消", QMessageBox.ButtonRole.RejectRole)
+            message.setDefaultButton(skip_button)
+            message.exec()
+            clicked = message.clickedButton()
+            if clicked is cancel_button:
+                return
+            if clicked is add_button:
+                selected = experiments
+        for experiment in selected:
+            self._append_experiment(experiment)
+        definition = ExperimentGenerator.definition(sweep_config, selected)
+        payload = definition.to_dict()
+        self.sweep_definitions.append(payload)
+        definition.save(
+            Path(self.output_directory_edit.text()) / "sweeps" / f"{sweep_config.sweep_id}.json"
+        )
+        QMessageBox.information(
+            self,
+            "參數掃描已加入",
+            f"已將 {len(selected)} 個實驗加入佇列；定義已儲存，可在執行前繼續編輯或刪除。",
         )
 
     def _run_benchmark(self) -> None:
@@ -469,12 +538,22 @@ class MainWindow(QMainWindow):
 
     def _show_results(self, project: BenchmarkProject) -> None:
         self.result_table.setRowCount(0)
+        configs_by_id = {
+            experiment.experiment_id: experiment for experiment in project.enabled_experiments
+        }
         for result in project.results:
             row = self.result_table.rowCount()
             self.result_table.insertRow(row)
             rate = result.registration_rate
+            config = configs_by_id.get(result.experiment_id or "")
+            source_labels = {"MANUAL": "手動", "SWEEP": "參數掃描", "BASELINE": "基準"}
             values = (
                 result.experiment_name,
+                (
+                    source_labels.get(config.experiment_role, config.experiment_role)
+                    if config else "未知"
+                ),
+                config.sweep_id if config and config.sweep_id else "—",
                 status_label(result.status),
                 self._display(result.registered_images),
                 self._display(rate * 100 if rate is not None else None, "%", 1),

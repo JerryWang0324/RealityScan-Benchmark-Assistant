@@ -6,7 +6,10 @@ from pathlib import Path
 from rs_benchmark.models import ExperimentConfig, ExperimentResult
 
 CSV_FIELDS = (
+    "experiment_id",
     "experiment_name",
+    "source",
+    "sweep_id",
     "status",
     "feature_detection_quality",
     "max_features_per_image",
@@ -28,7 +31,10 @@ def result_row(
     result: ExperimentResult, config: ExperimentConfig | None = None
 ) -> dict[str, object]:
     return {
+        "experiment_id": config.experiment_id if config else result.experiment_id,
         "experiment_name": result.experiment_name,
+        "source": config.experiment_role if config else None,
+        "sweep_id": config.sweep_id if config else None,
         "status": result.status.value,
         "feature_detection_quality": config.feature_detection_quality if config else None,
         "max_features_per_image": config.max_features_per_image if config else None,
@@ -57,13 +63,17 @@ def export_results_csv(
     experiments: list[ExperimentConfig],
 ) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    configs = {experiment.name: experiment for experiment in experiments}
+    configs_by_id = {experiment.experiment_id: experiment for experiment in experiments}
+    configs_by_name = {experiment.name: experiment for experiment in experiments}
     # UTF-8 with BOM keeps Traditional Chinese names readable in Excel.
     with path.open("w", encoding="utf-8-sig", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=CSV_FIELDS, extrasaction="ignore")
         writer.writeheader()
         for result in results:
-            row = result_row(result, configs.get(result.experiment_name))
+            config = configs_by_id.get(result.experiment_id or "") or configs_by_name.get(
+                result.experiment_name
+            )
+            row = result_row(result, config)
             writer.writerow({key: "N/A" if value is None else value for key, value in row.items()})
     return path
 

@@ -5,13 +5,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from rs_benchmark.models import ExperimentConfig
+from rs_benchmark.realityscan.parameter_schema import PARAMETER_SCHEMA
 
-ALIGNMENT_KEYS = {
-    "feature_detection_quality": "sfmFeatureDetectionQuality",
-    "max_features_per_image": "sfmMaxFeaturesPerImage",
-    "image_overlap": "sfmImagesOverlap",
-    "max_feature_reprojection_error": "sfmMaxFeatureReprojectionError",
-}
+ALIGNMENT_KEYS = {name: definition.cli_key for name, definition in PARAMETER_SCHEMA.items()}
 ALIGNMENT_PARAMETER_KEYS = ALIGNMENT_KEYS
 APPLICATION_KEYS = {"quit_on_error": "appQuitOnError"}
 

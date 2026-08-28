@@ -20,6 +20,7 @@ from rs_benchmark.models.benchmark import slug
 from rs_benchmark.realityscan.controller import RealityScanController
 from rs_benchmark.reports import export_results_csv, generate_charts
 from rs_benchmark.reports.csv_exporter import result_row
+from rs_benchmark.reports.sweep_analysis import relative_to_baseline
 from rs_benchmark.services.single_experiment_runner import SingleExperimentRunner
 
 LOGGER = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ class BenchmarkRunner:
                 break
 
             self._emit(progress_callback, index, len(enabled), experiment.name, "RUNNING")
-            directory = root / "experiments" / f"{index:03d}_{slug(experiment.name)}"
+            directory = root / "experiments" / f"{index:03d}_{experiment.experiment_id}"
             config = project.experiment_config(experiment, directory.parent)
             try:
                 result = self._run_single(config, directory)
@@ -96,6 +97,7 @@ class BenchmarkRunner:
                     json.dumps(result.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
                 )
                 (directory / "stderr.log").write_text(str(exc), encoding="utf-8")
+            result.experiment_id = experiment.experiment_id
             project.results.append(result)
             project.save(root / "benchmark.json")
             self._log(
@@ -153,6 +155,15 @@ class BenchmarkRunner:
             suffix += 1
         (root / "experiments").mkdir(parents=True)
         (root / "summary" / "charts").mkdir(parents=True)
+        definitions = project.metadata.get("sweep_definitions", [])
+        if definitions:
+            sweeps = root / "sweeps"
+            sweeps.mkdir()
+            for definition in definitions:
+                sweep_id = definition.get("sweep_id", "sweep")
+                (sweeps / f"{sweep_id}.json").write_text(
+                    json.dumps(definition, indent=2, ensure_ascii=False), encoding="utf-8"
+                )
         project.run_directory = root
         return root
 
@@ -163,7 +174,11 @@ class BenchmarkRunner:
         status: ExperimentStatus,
     ) -> None:
         project.results.extend(
-            ExperimentResult(experiment_name=experiment.name, status=status)
+            ExperimentResult(
+                experiment_name=experiment.name,
+                status=status,
+                experiment_id=experiment.experiment_id,
+            )
             for experiment in experiments
         )
 
@@ -193,7 +208,9 @@ class BenchmarkRunner:
     def _write_reports(project: BenchmarkProject, root: Path) -> None:
         summary = root / "summary"
         export_results_csv(summary / "results.csv", project.results, project.enabled_experiments)
-        generate_charts(summary / "charts", project.results)
+        generate_charts(
+            summary / "charts", project.results, project.enabled_experiments
+        )
         success_count = sum(
             result.status in {ExperimentStatus.SUCCESS, ExperimentStatus.DRY_RUN}
             for result in project.results
@@ -225,10 +242,48 @@ class BenchmarkRunner:
                 )
                 for result in project.results
             ],
+            "sweep_analysis": BenchmarkRunner._sweep_analysis(project),
         }
         (summary / "benchmark_summary.json").write_text(
             json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
         )
+
+    @staticmethod
+    def _sweep_analysis(project: BenchmarkProject) -> list[dict[str, object]]:
+        results = {item.experiment_id: item for item in project.results if item.experiment_id}
+        groups: dict[str, list[ExperimentConfig]] = {}
+        for experiment in project.enabled_experiments:
+            if experiment.sweep_id:
+                groups.setdefault(experiment.sweep_id, []).append(experiment)
+        payload: list[dict[str, object]] = []
+        for sweep_id, experiments in groups.items():
+            baseline_config = next(
+                (item for item in experiments if item.experiment_role == "BASELINE"), None
+            )
+            baseline = results.get(baseline_config.experiment_id) if baseline_config else None
+            rows = []
+            if baseline:
+                for config in experiments:
+                    result = results.get(config.experiment_id)
+                    if not result:
+                        continue
+                    relative = relative_to_baseline(result, baseline)
+                    rows.append({
+                        "experiment_id": config.experiment_id,
+                        "experiment_name": config.name,
+                        "registration_rate_delta_pp": relative.registration_rate_delta_pp,
+                        "runtime_delta_seconds": relative.runtime_delta_seconds,
+                        "runtime_ratio": relative.runtime_ratio,
+                        "reprojection_error_delta": relative.reprojection_error_delta,
+                        "sparse_point_delta": relative.sparse_point_delta,
+                    })
+            payload.append({
+                "sweep_id": sweep_id,
+                "mode": experiments[0].sweep_mode,
+                "varied_parameters": list(experiments[0].varied_parameters),
+                "relative_to_baseline": rows,
+            })
+        return payload
 
     @staticmethod
     def _log(root: Path, message: str) -> None:

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication
 
 from rs_benchmark.gui.localization import localize_error_message, status_label
 from rs_benchmark.gui.main_window import MainWindow
+from rs_benchmark.gui.sweep_dialog import ParameterSweepDialog
 from rs_benchmark.models import ExperimentResult, ExperimentStatus
 
 _CHINESE_CHARACTER = re.compile(r"[\u3400-\u9fff]")
@@ -66,6 +67,21 @@ def test_internal_values_use_chinese_display_labels() -> None:
     window._duplicate_experiment()
     assert window.experiment_table.item(3, 1).text() == "預設 副本"
     window.close()
+    assert app is not None
+
+
+def test_parameter_sweep_dialog_uses_chinese_labels_and_live_count() -> None:
+    app = QApplication.instance() or QApplication([])
+    dialog = ParameterSweepDialog()
+
+    assert dialog.mode_combo.currentText() == "完整因子組合"
+    assert dialog.quality_checks[0].text() == "高"
+    assert dialog.count_label.text() == "將產生實驗：12"
+    assert dialog.sweep_config().experiment_count == 12
+    dialog.mode_combo.setCurrentIndex(1)
+    assert dialog.baseline_group.isEnabled()
+    assert dialog.sweep_config().experiment_count == 5
+    dialog.close()
     assert app is not None
 
 
