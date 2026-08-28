@@ -105,7 +105,7 @@ class RealityScanController:
         try:
             completed = subprocess.run(
                 command, capture_output=True, text=True, check=False,
-                timeout=timeout_seconds, shell=False,
+                encoding="utf-8", errors="replace", timeout=timeout_seconds, shell=False,
             )
         except subprocess.TimeoutExpired as exc:
             runtime = time.perf_counter() - started

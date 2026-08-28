@@ -53,6 +53,8 @@ def test_internal_values_use_chinese_display_labels() -> None:
     assert window.overlap_combo.currentData() == "Medium"
     assert window._config().feature_detection_quality == "High"
     assert window._config().image_overlap == "Medium"
+    assert window.timeout_spin.value() == 60
+    assert window._config().timeout_seconds == 3_600
     window.close()
     assert app is not None
 
@@ -84,6 +86,9 @@ def test_statuses_and_known_errors_are_localized() -> None:
     assert localize_error_message("Image folder does not exist: C:/missing") == (
         "影像資料夾不存在：C:/missing"
     )
+    assert localize_error_message(
+        "Alignment completed, but report export or parsing failed: empty report"
+    ) == "RealityScan 對齊已完成，但報告匯出或解析失敗：empty report"
 
 
 def test_static_gui_text_uses_chinese_as_primary_language() -> None:

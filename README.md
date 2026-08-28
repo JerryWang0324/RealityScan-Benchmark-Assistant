@@ -68,6 +68,7 @@ Command chain:
 -headless
 -silent <crash-report-folder>
 -stdConsole
+-set appQuitOnError=true
 -newScene
 -addFolder <image-folder>
 -set sfmFeatureDetectionQuality=<High|Normal>
@@ -142,14 +143,19 @@ ruff check .
 Unit tests use mocked/fake controllers and do not require RealityScan. Fixtures under
 `tests/fixtures/` are minimal project-authored report samples, not copied RealityScan reports.
 
+The opt-in test in `integration_tests/` loads an existing project and exports only the report. It
+requires explicit `RSBA_RUN_REALITYSCAN_INTEGRATION=1` plus executable, project, and output paths;
+ordinary `pytest` runs never launch RealityScan. The report template has been verified successfully
+against RealityScan 2.2.0.119430 RS.
+
 ## Known Limitations
 
 - Image discovery is intentionally non-recursive, matching the current single-folder workflow.
 - A RealityScan login/license dialog can still require interaction even in headless mode.
-- The custom report template and full command chain require verification against the exact locally
-  installed RealityScan build; unit tests validate our integration boundary, not Epic's binary.
+- The report template is verified against RealityScan 2.2; other versions may expose different
+  paRSer variables and should run the opt-in report-only integration test before full alignment.
 - Sparse points and reprojection error are defined for the largest component, not aggregated across
   unrelated components.
-- Cancellation is not implemented; an optional `timeout_seconds` is available in
-  `ExperimentConfig` but is not yet exposed in the GUI.
+- Cancellation is not implemented. The GUI exposes an execution timeout with a 60-minute default;
+  choosing unlimited time maps back to `timeout_seconds=None`.
 - Real RealityScan integration tests are machine-specific and are not part of CI.

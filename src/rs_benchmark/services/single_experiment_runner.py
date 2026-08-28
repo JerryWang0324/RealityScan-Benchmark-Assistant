@@ -74,17 +74,20 @@ class SingleExperimentRunner:
             stdout_path.write_text(process.stdout, encoding="utf-8")
             stderr_path.write_text(process.stderr, encoding="utf-8")
             if process.timed_out:
+                self._append_runner_error(stderr_path, "RealityScan process timed out")
                 result = ExperimentResult(
                     experiment_name=config.name, status=ExperimentStatus.TIMEOUT,
                     total_images=dataset.total_images, runtime_seconds=process.runtime_seconds,
                     exit_code=process.return_code, error_message="RealityScan process timed out",
                 )
             elif process.return_code != 0:
+                process_error = f"RealityScan exited with code {process.return_code}"
+                self._append_runner_error(stderr_path, process_error)
                 result = ExperimentResult(
                     experiment_name=config.name, status=ExperimentStatus.FAILED,
                     total_images=dataset.total_images, runtime_seconds=process.runtime_seconds,
                     exit_code=process.return_code,
-                    error_message=f"RealityScan exited with code {process.return_code}",
+                    error_message=process_error,
                 )
             else:
                 result = self.parser.parse(output_paths.report_file, config.name)
@@ -94,15 +97,20 @@ class SingleExperimentRunner:
         except (RealityScanError, ReportParseError, OSError) as exc:
             LOGGER.exception("Single alignment experiment failed")
             stdout_path.touch(exist_ok=True)
-            with stderr_path.open("a", encoding="utf-8") as stderr_file:
-                stderr_file.write(f"\nRSBA runner error: {exc}\n")
+            alignment_completed = output_paths.project_file.is_file()
+            error_message = str(exc)
+            if alignment_completed and isinstance(exc, ReportParseError):
+                error_message = (
+                    "Alignment completed, but report export or parsing failed: " f"{exc}"
+                )
+            self._append_runner_error(stderr_path, error_message)
             result = ExperimentResult(
                 experiment_name=config.name,
                 status=ExperimentStatus.FAILED,
                 total_images=dataset.total_images,
                 runtime_seconds=process.runtime_seconds if process else None,
                 exit_code=process.return_code if process else None,
-                error_message=str(exc),
+                error_message=error_message,
             )
 
         finished = datetime.now().astimezone()
@@ -165,3 +173,8 @@ class SingleExperimentRunner:
     @staticmethod
     def _write_json(path: Path, data: object) -> None:
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    @staticmethod
+    def _append_runner_error(path: Path, message: str) -> None:
+        with path.open("a", encoding="utf-8") as log_file:
+            log_file.write(f"\nRSBA runner error: {message}\n")

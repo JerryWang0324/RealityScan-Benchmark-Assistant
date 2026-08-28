@@ -35,6 +35,10 @@ def localize_error_message(message: str | None) -> str:
         ("Unable to read report:", "無法讀取對齊報告："),
         ("Alignment report is empty:", "對齊報告是空的："),
         ("Unrecognized alignment report format:", "無法辨識對齊報告格式："),
+        (
+            "Alignment completed, but report export or parsing failed:",
+            "RealityScan 對齊已完成，但報告匯出或解析失敗：",
+        ),
     )
     for english, chinese in prefix_translations:
         if message.startswith(english):

@@ -19,6 +19,7 @@ Thumbs.db
 config/app_settings.json
 logs/
 benchmark_runs/
+integration_tests/output/
 *.rsproj
 *.rcproj
 *.rsalign

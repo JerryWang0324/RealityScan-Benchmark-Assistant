@@ -13,10 +13,11 @@ ALIGNMENT_KEYS = {
     "max_feature_reprojection_error": "sfmMaxFeatureReprojectionError",
 }
 ALIGNMENT_PARAMETER_KEYS = ALIGNMENT_KEYS
+APPLICATION_KEYS = {"quit_on_error": "appQuitOnError"}
 
 CLI = {
     "headless": "-headless", "silent": "-silent", "std_console": "-stdConsole",
-    "new_scene": "-newScene", "add_folder": "-addFolder", "set": "-set",
+    "new_scene": "-newScene", "load": "-load", "add_folder": "-addFolder", "set": "-set",
     "align": "-align", "save": "-save", "set_min_component_size": "-setMinComponentSize",
     "export_latest_components": "-exportLatestComponents", "export_report": "-exportReport",
     "quit": "-quit",
@@ -44,8 +45,9 @@ def build_alignment_command(
     }
     command = [
         str(config.realityscan_executable), CLI["headless"], CLI["silent"],
-        str(output_paths.crash_reports_directory), CLI["std_console"], CLI["new_scene"],
-        CLI["add_folder"], str(config.image_folder),
+        str(output_paths.crash_reports_directory), CLI["std_console"], CLI["set"],
+        f"{APPLICATION_KEYS['quit_on_error']}=true", CLI["new_scene"], CLI["add_folder"],
+        str(config.image_folder),
     ]
     for internal_name, cli_key in ALIGNMENT_KEYS.items():
         command.extend([CLI["set"], f"{cli_key}={parameter_values[internal_name]}"])
@@ -56,6 +58,31 @@ def build_alignment_command(
         str(output_paths.report_file), str(output_paths.report_template), CLI["quit"],
     ])
     return command
+
+
+def build_report_export_command(
+    executable: Path,
+    project_file: Path,
+    report_file: Path,
+    report_template: Path,
+    crash_reports_directory: Path,
+) -> list[str]:
+    """Build a report-only command for integration checks and future recovery workflows."""
+    return [
+        str(executable),
+        CLI["headless"],
+        CLI["silent"],
+        str(crash_reports_directory),
+        CLI["std_console"],
+        CLI["set"],
+        f"{APPLICATION_KEYS['quit_on_error']}=true",
+        CLI["load"],
+        str(project_file),
+        CLI["export_report"],
+        str(report_file),
+        str(report_template),
+        CLI["quit"],
+    ]
 
 
 def format_command(command: list[str]) -> str:

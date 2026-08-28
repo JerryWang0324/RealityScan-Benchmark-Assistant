@@ -118,10 +118,16 @@ class MainWindow(QMainWindow):
         self.reprojection_spin.setRange(0.01, 100.0)
         self.reprojection_spin.setDecimals(2)
         self.reprojection_spin.setValue(2.0)
+        self.timeout_spin = QSpinBox()
+        self.timeout_spin.setRange(0, 1_440)
+        self.timeout_spin.setValue(60)
+        self.timeout_spin.setSpecialValueText("不限時間")
+        self.timeout_spin.setSuffix(" 分鐘")
         form.addRow("特徵偵測品質", self.quality_combo)
         form.addRow("每張影像最大特徵數", self.features_spin)
         form.addRow("影像重疊程度", self.overlap_combo)
         form.addRow("最大重投影誤差（像素）", self.reprojection_spin)
+        form.addRow("執行逾時時間", self.timeout_spin)
         return group
 
     def _config(self) -> ExperimentConfig:
@@ -134,6 +140,7 @@ class MainWindow(QMainWindow):
             image_overlap=self.overlap_combo.currentData(),
             max_feature_reprojection_error=self.reprojection_spin.value(),
             output_directory=benchmark_runs_directory(),
+            timeout_seconds=(self.timeout_spin.value() * 60 or None),
             dry_run=self.dry_run_check.isChecked(),
         )
 

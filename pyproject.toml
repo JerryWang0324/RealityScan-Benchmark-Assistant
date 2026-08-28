@@ -35,6 +35,7 @@ where = ["src"]
 addopts = "-ra"
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = ["integration: requires an installed RealityScan and explicit opt-in"]
 
 [tool.ruff]
 line-length = 100

@@ -31,6 +31,8 @@ def test_success_and_nonzero_exit_are_results(tmp_path: Path) -> None:
     assert failure.return_code == 7
     assert failure.stderr == "problem"
     assert run.call_args.kwargs["shell"] is False
+    assert run.call_args.kwargs["encoding"] == "utf-8"
+    assert run.call_args.kwargs["errors"] == "replace"
 
 
 def test_timeout_is_captured_not_raised(tmp_path: Path) -> None:

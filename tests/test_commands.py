@@ -1,7 +1,11 @@
 from pathlib import Path
 
 from rs_benchmark.models import ExperimentConfig
-from rs_benchmark.realityscan.commands import AlignmentOutputPaths, build_alignment_command
+from rs_benchmark.realityscan.commands import (
+    AlignmentOutputPaths,
+    build_alignment_command,
+    build_report_export_command,
+)
 
 
 def _outputs(root: Path) -> AlignmentOutputPaths:
@@ -33,6 +37,9 @@ def test_command_uses_official_keys_and_output_paths() -> None:
     ]
     assert "-exportLatestComponents" in command
     assert "-exportReport" in command
+    quit_on_error = command.index("appQuitOnError=true")
+    assert command[quit_on_error - 1] == "-set"
+    assert quit_on_error < command.index("-newScene")
     assert command[-1] == "-quit"
 
 
@@ -45,4 +52,20 @@ def test_paths_with_spaces_remain_single_arguments() -> None:
 
     assert "folder with spaces" in command
     assert "output with spaces\\project.rsproj" in command
+    assert all('"' not in argument for argument in command)
+
+
+def test_report_only_command_uses_error_exit_and_argument_list() -> None:
+    command = build_report_export_command(
+        executable=Path("D:/Epic Games/RealityScan.exe"),
+        project_file=Path("existing project/project.rsproj"),
+        report_file=Path("new output/report.html"),
+        report_template=Path("new output/template.html"),
+        crash_reports_directory=Path("new output/crashes"),
+    )
+
+    assert command[0] == "D:\\Epic Games\\RealityScan.exe"
+    assert command[command.index("-set") + 1] == "appQuitOnError=true"
+    assert command[command.index("-load") + 1] == "existing project\\project.rsproj"
+    assert command[-1] == "-quit"
     assert all('"' not in argument for argument in command)
