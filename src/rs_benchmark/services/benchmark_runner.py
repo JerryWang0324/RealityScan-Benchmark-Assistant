@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
+from rs_benchmark.analysis import analyze_benchmark
 from rs_benchmark.models import (
     BenchmarkProject,
     BenchmarkStatus,
@@ -18,10 +19,17 @@ from rs_benchmark.models import (
 )
 from rs_benchmark.models.benchmark import slug
 from rs_benchmark.realityscan.controller import RealityScanController
-from rs_benchmark.reports import export_results_csv, generate_charts
+from rs_benchmark.reports import (
+    export_reproducibility_package,
+    export_results_csv,
+    generate_charts,
+    generate_html_report,
+    generate_pareto_chart,
+)
 from rs_benchmark.reports.csv_exporter import result_row
 from rs_benchmark.reports.sweep_analysis import relative_to_baseline
 from rs_benchmark.services.single_experiment_runner import SingleExperimentRunner
+from rs_benchmark.utils.path_sanitizer import PathDisplaySanitizer
 
 LOGGER = logging.getLogger(__name__)
 ProgressCallback = Callable[["BenchmarkProgress"], None]
@@ -33,6 +41,8 @@ class BenchmarkProgress:
     total: int
     experiment_name: str
     phase: str
+    repeat_index: int = 1
+    repeat_count: int = 1
 
     @property
     def percent(self) -> int:
@@ -69,18 +79,33 @@ class BenchmarkRunner:
         self._log(root, f"Benchmark started: {project.name}")
 
         enabled = project.enabled_experiments
+        queue = [
+            (experiment, repeat_index)
+            for experiment in enabled
+            for repeat_index in range(1, project.repeat_count + 1)
+        ]
         stop_queue = False
-        for index, experiment in enumerate(enabled, start=1):
+        for index, (experiment, repeat_index) in enumerate(queue, start=1):
             if self._cancel_requested.is_set():
-                self._append_remaining(project, enabled[index - 1 :], ExperimentStatus.CANCELLED)
+                self._append_remaining(
+                    project, queue[index - 1 :], ExperimentStatus.CANCELLED, project.repeat_count
+                )
                 project.status = BenchmarkStatus.CANCELLED
                 break
             if stop_queue:
-                self._append_remaining(project, enabled[index - 1 :], ExperimentStatus.SKIPPED)
+                self._append_remaining(
+                    project, queue[index - 1 :], ExperimentStatus.SKIPPED, project.repeat_count
+                )
                 break
 
-            self._emit(progress_callback, index, len(enabled), experiment.name, "RUNNING")
-            directory = root / "experiments" / f"{index:03d}_{experiment.experiment_id}"
+            self._emit(
+                progress_callback, index, len(queue), experiment.name, "RUNNING",
+                repeat_index, project.repeat_count,
+            )
+            directory = (
+                root / "experiments"
+                / f"{index:03d}_{experiment.experiment_id}_repeat_{repeat_index:02d}"
+            )
             config = project.experiment_config(experiment, directory.parent)
             try:
                 result = self._run_single(config, directory)
@@ -98,23 +123,36 @@ class BenchmarkRunner:
                 )
                 (directory / "stderr.log").write_text(str(exc), encoding="utf-8")
             result.experiment_id = experiment.experiment_id
+            result.repeat_index = repeat_index
+            result.repeat_count = project.repeat_count
+            (directory / "result.json").write_text(
+                json.dumps(result.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
+            )
             project.results.append(result)
             project.save(root / "benchmark.json")
             self._log(
                 root,
-                f"Experiment {index}/{len(enabled)} {experiment.name}: {result.status.value}",
+                f"Experiment {index}/{len(queue)} {experiment.name} "
+                f"repeat {repeat_index}/{project.repeat_count}: {result.status.value}",
             )
-            self._emit(progress_callback, index, len(enabled), experiment.name, "FINISHED")
+            self._emit(
+                progress_callback, index, len(queue), experiment.name, "FINISHED",
+                repeat_index, project.repeat_count,
+            )
 
             if self._cancel_requested.is_set():
-                self._append_remaining(project, enabled[index:], ExperimentStatus.CANCELLED)
+                self._append_remaining(
+                    project, queue[index:], ExperimentStatus.CANCELLED, project.repeat_count
+                )
                 project.status = BenchmarkStatus.CANCELLED
                 break
             if project.stop_on_failure and result.status in {
                 ExperimentStatus.FAILED,
                 ExperimentStatus.TIMEOUT,
             }:
-                self._append_remaining(project, enabled[index:], ExperimentStatus.SKIPPED)
+                self._append_remaining(
+                    project, queue[index:], ExperimentStatus.SKIPPED, project.repeat_count
+                )
                 stop_queue = True
                 break
 
@@ -170,16 +208,19 @@ class BenchmarkRunner:
     @staticmethod
     def _append_remaining(
         project: BenchmarkProject,
-        experiments: list[ExperimentConfig],
+        queue: list[tuple[ExperimentConfig, int]],
         status: ExperimentStatus,
+        repeat_count: int,
     ) -> None:
         project.results.extend(
             ExperimentResult(
                 experiment_name=experiment.name,
                 status=status,
                 experiment_id=experiment.experiment_id,
+                repeat_index=repeat_index,
+                repeat_count=repeat_count,
             )
-            for experiment in experiments
+            for experiment, repeat_index in queue
         )
 
     @staticmethod
@@ -200,34 +241,43 @@ class BenchmarkRunner:
         total: int,
         name: str,
         phase: str,
+        repeat_index: int = 1,
+        repeat_count: int = 1,
     ) -> None:
         if callback:
-            callback(BenchmarkProgress(current, total, name, phase))
+            callback(
+                BenchmarkProgress(
+                    current, total, name, phase, repeat_index, repeat_count
+                )
+            )
 
     @staticmethod
     def _write_reports(project: BenchmarkProject, root: Path) -> None:
         summary = root / "summary"
         export_results_csv(summary / "results.csv", project.results, project.enabled_experiments)
-        generate_charts(
+        analysis = analyze_benchmark(project)
+        (summary / "analysis.json").write_text(
+            json.dumps(analysis.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        chart_paths = generate_charts(
             summary / "charts", project.results, project.enabled_experiments
         )
-        success_count = sum(
-            result.status in {ExperimentStatus.SUCCESS, ExperimentStatus.DRY_RUN}
-            for result in project.results
+        pareto_path = generate_pareto_chart(
+            summary / "charts" / "pareto_registration_runtime.png",
+            project.results,
+            analysis.pareto_experiment_ids,
         )
-        failed_count = sum(
-            result.status in {ExperimentStatus.FAILED, ExperimentStatus.TIMEOUT}
-            for result in project.results
-        )
+        if pareto_path:
+            chart_paths.append(pareto_path)
         payload = {
             "benchmark_name": project.name,
-            "dataset": str(project.image_folder),
+            "dataset": PathDisplaySanitizer.sanitize(project.image_folder),
             "experiment_count": len(project.enabled_experiments),
-            "success_count": success_count,
-            "failed_count": failed_count,
-            "total_runtime_seconds": sum(
-                result.runtime_seconds or 0 for result in project.results
-            ),
+            "repeat_count": project.repeat_count,
+            "total_run_count": len(project.enabled_experiments) * project.repeat_count,
+            "success_count": analysis.successful_count,
+            "failed_count": analysis.failed_count,
+            "total_runtime_seconds": analysis.total_runtime_seconds,
             "status": project.status.value,
             "results": [
                 result_row(
@@ -242,10 +292,14 @@ class BenchmarkRunner:
                 )
                 for result in project.results
             ],
-            "sweep_analysis": BenchmarkRunner._sweep_analysis(project),
+            "sweep_analysis": analysis.to_dict()["sweep_analysis"],
         }
         (summary / "benchmark_summary.json").write_text(
             json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8"
+        )
+        generate_html_report(summary / "report.html", project, analysis, chart_paths)
+        export_reproducibility_package(
+            summary / f"{slug(project.name)}_reproducibility.zip", project, root
         )
 
     @staticmethod

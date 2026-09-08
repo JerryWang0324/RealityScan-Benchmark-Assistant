@@ -1,12 +1,29 @@
 # RealityScan Benchmark Assistant
 
-A Windows/PySide6 desktop application for reproducible, multi-experiment RealityScan alignment
-benchmarks.
+A reproducible benchmarking and experiment-management tool for RealityScan photogrammetric
+alignment workflows.
 
-> **Project status:** Phase 4. The application designs Full Factorial and One Factor At A Time
-> parameter sweeps, previews and saves them, then runs generated experiments through the existing
-> isolated alignment queue. Automatic optimization, dense reconstruction, mesh/texture benchmarks,
-> AI recommendations, cloud services, and databases remain intentionally out of scope.
+> **Project status:** Phase 5 / v0.5.0. The application connects experiment design, isolated
+> RealityScan execution, structured scientific analysis, Pareto comparison, offline HTML reporting,
+> and privacy-conscious reproducibility packages. It intentionally makes no “best overall” claim.
+
+## Motivation
+
+RealityScan exposes several alignment parameters. Repeatedly changing parameters, running alignment,
+recording results, and comparing outcomes by hand is slow and makes experiment records inconsistent.
+This application turns that sequence into a traceable workflow while keeping interpretation limited
+to claims supported by the collected data.
+
+## Features
+
+- Single Alignment Test and Multi-Experiment Benchmark
+- Manual, Full Factorial, and One Factor At A Time experiment design
+- CSV and structured JSON export
+- Parameter-versus-metric and Pareto charts
+- Registration-rate/runtime Pareto analysis
+- Sweep sensitivity, marginal-gain, and descriptive diminishing-return observations
+- Offline HTML report
+- Sanitized reproducibility ZIP package
 
 ## Installation
 
@@ -39,9 +56,11 @@ One Dataset + One RealityScan Executable
                     ↓
            Collect Result Metrics
                     ↓
-          Descriptive Comparison
+          Structured Analysis
                     ↓
-        CSV + Summary JSON + Charts
+         Pareto Analysis + Report
+                    ↓
+          CSV + Charts + HTML + ZIP
 ```
 
 The shared image folder and RealityScan executable are selected once. Experiment rows contain only
@@ -166,7 +185,7 @@ largest component camera count, sparse point count, mean reprojection error, and
 values are displayed as `N/A`. Actions open the output folder, copy the CSV to another location, or
 open the first generated chart.
 
-The descriptive comparison can identify:
+The structured analysis can identify:
 
 - higher registration rate;
 - shorter runtime;
@@ -174,6 +193,11 @@ The descriptive comparison can identify:
 - higher sparse point count.
 
 It deliberately does not calculate or claim a “best overall” configuration.
+
+Successful runs with registration rate and runtime are compared using Pareto dominance. Experiment
+A dominates B when A has at least as high a registration rate and at most as long a runtime, with at
+least one strict improvement. Exact coordinate ties remain together on the frontier. Single-result,
+missing-metric, and all-failed benchmarks do not fabricate a Pareto comparison.
 
 For a sweep in which exactly one parameter varies, reports also include line charts for every metric
 with at least two valid values: parameter versus registration rate, runtime, reported mean
@@ -199,6 +223,19 @@ Runtime: 228 s
 ```
 
 The corresponding complete mock CSV is in [`sample/mock_results.csv`](sample/mock_results.csv).
+
+### Phase 5 analysis example
+
+| Experiment | Registration | Runtime | Reported reprojection |
+| --- | ---: | ---: | ---: |
+| A | 92% | 120 s | 0.72 px |
+| B | 97% | 190 s | 0.65 px |
+| C | 98% | 360 s | 0.58 px |
+| D | 94% | 250 s | 0.69 px |
+
+Metric leaders are C for registration and reported reprojection error, and A for runtime. The
+registration/runtime frontier is A, B, and C; D is dominated by B. These are separate descriptive
+comparisons, with no overall winner inferred.
 
 ## Benchmark Output Structure
 
@@ -226,13 +263,23 @@ benchmark_runs/
     └── summary/
         ├── results.csv
         ├── benchmark_summary.json
+        ├── analysis.json
+        ├── report.html
+        ├── building_test_reproducibility.zip
         └── charts/
             ├── registration_rate.png
             ├── runtime.png
             ├── mean_reprojection_error.png
             ├── sparse_point_count.png
+            ├── pareto_registration_runtime.png
             └── sweep_a31f2c9d10_max_features_per_image_registration_rate.png
 ```
+
+`report.html` embeds its CSS and refers only to local chart PNGs, so it opens offline by double
+clicking. The ZIP contains sanitized `benchmark.json`, summary JSON, CSV, analysis, HTML, charts,
+sweep definitions, experiment configs, and environment metadata. It excludes source images,
+RealityScan executables, caches, and full project output. Absolute public paths are reduced to labels
+such as `<dataset>/Building01`.
 
 Reprojection-error charts require at least two valid values. Sparse-point and other charts are not
 created when all values are unavailable. RealityScan creates its project/report/component outputs;
@@ -329,6 +376,22 @@ single-variable charts, Traditional Chinese live counts, model serialization, qu
 failure isolation, stop-on-failure,
 cooperative cancellation, disabled rows, CSV encoding/missing values, conditional chart creation,
 comparison helpers, report parsing, command construction, and Traditional Chinese GUI text.
+Phase 5 tests additionally cover Pareto domination and ties, missing metrics, sweep deltas and safe
+division, diminishing-return wording, all-failed HTML output, integrity warnings, path sanitization,
+ZIP allow-list contents, and a mock report-level integration flow.
+
+## Documentation
+
+- [Architecture](docs/architecture.md)
+- [Metrics](docs/metrics.md)
+- [Experimental design](docs/experimental_design.md)
+- [Reproducibility](docs/reproducibility.md)
+- [Scientific limitations](docs/scientific_limitations.md)
+
+## Screenshots
+
+The [`docs/images/`](docs/images/) directory is reserved for screenshots captured from verified GUI
+runs. No fabricated screenshots are included.
 
 The opt-in real tests under `integration_tests/` are skipped unless explicitly enabled:
 

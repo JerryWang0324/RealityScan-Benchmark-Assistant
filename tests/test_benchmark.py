@@ -70,6 +70,7 @@ def test_project_json_round_trip_with_multiple_experiments(tmp_path: Path) -> No
             ExperimentResult("預設", ExperimentStatus.SUCCESS, total_images=10, registered_images=9)
         ],
         status=BenchmarkStatus.PARTIAL_SUCCESS,
+        repeat_count=3,
     )
 
     restored = BenchmarkProject.from_dict(project.to_dict())
@@ -78,6 +79,31 @@ def test_project_json_round_trip_with_multiple_experiments(tmp_path: Path) -> No
     assert restored.status is BenchmarkStatus.PARTIAL_SUCCESS
     assert [item.name for item in restored.experiments] == ["預設", "高特徵數"]
     assert restored.results[0].registration_rate == pytest.approx(0.9)
+    assert restored.repeat_count == 3
+
+
+def test_legacy_project_defaults_to_one_repeat(tmp_path: Path) -> None:
+    data = BenchmarkProject(
+        name="舊專案",
+        image_folder=tmp_path,
+        experiments=[ExperimentConfig(name="預設")],
+    ).to_dict()
+    data.pop("repeat_count")
+
+    assert BenchmarkProject.from_dict(data).repeat_count == 1
+
+
+def test_repeat_count_outside_supported_range_is_rejected(tmp_path: Path) -> None:
+    (tmp_path / "one.jpg").touch()
+    project = BenchmarkProject(
+        name="測試",
+        image_folder=tmp_path,
+        experiments=[ExperimentConfig(name="預設")],
+        repeat_count=101,
+    )
+
+    with pytest.raises(ValueError, match="Repeat count"):
+        project.validate()
 
 
 def test_identical_parameters_produce_warning(tmp_path: Path) -> None:

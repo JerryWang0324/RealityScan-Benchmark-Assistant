@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "realityscan-benchmark-assistant"
-version = "0.2.0"
+dynamic = ["version"]
 description = "A reproducible RealityScan alignment benchmarking desktop tool."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -30,6 +30,9 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "rs_benchmark._version.__version__" }
 
 [tool.pytest.ini_options]
 addopts = "-ra"

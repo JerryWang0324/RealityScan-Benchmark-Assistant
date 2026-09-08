@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 from dataclasses import replace
 from pathlib import Path
@@ -45,6 +46,7 @@ from rs_benchmark.models import (
     BenchmarkProject,
     ExperimentConfig,
     ExperimentResult,
+    ExperimentStatus,
 )
 from rs_benchmark.realityscan.dataset import validate_dataset
 from rs_benchmark.services.benchmark_runner import BenchmarkProgress
@@ -66,6 +68,20 @@ def built_in_presets() -> list[ExperimentConfig]:
             name="嚴格幾何", image_overlap="High", max_feature_reprojection_error=1.0
         ),
     ]
+
+
+class SortableTableWidgetItem(QTableWidgetItem):
+    def __init__(self, text: str, sort_value: object = None) -> None:
+        super().__init__(text)
+        self.sort_value = sort_value if sort_value is not None else text
+
+    def __lt__(self, other: QTableWidgetItem) -> bool:
+        if isinstance(other, SortableTableWidgetItem):
+            try:
+                return self.sort_value < other.sort_value  # type: ignore[operator]
+            except TypeError:
+                return str(self.sort_value) < str(other.sort_value)
+        return super().__lt__(other)
 
 
 class MainWindow(QMainWindow):
@@ -97,6 +113,7 @@ class MainWindow(QMainWindow):
         setup_layout = QVBoxLayout(self.setup_tab)
         setup_layout.addWidget(self._dataset_group())
         setup_layout.addWidget(self._experiments_group(), stretch=1)
+        setup_layout.addWidget(self._repeat_group())
         setup_layout.addWidget(self._run_controls())
         tabs.addTab(self.setup_tab, "效能測試設定")
         tabs.addTab(self._results_tab(), "結果")
@@ -159,6 +176,7 @@ class MainWindow(QMainWindow):
         for column in (0, 2, 3, 4, 5, 6):
             header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
         self.experiment_table.doubleClicked.connect(self._edit_experiment)
+        self.experiment_table.itemChanged.connect(self._update_run_count)
         layout.addWidget(self.experiment_table)
 
         buttons = QHBoxLayout()
@@ -178,6 +196,37 @@ class MainWindow(QMainWindow):
         buttons.addStretch()
         layout.addLayout(buttons)
         return group
+
+    def _repeat_group(self) -> QGroupBox:
+        group = QGroupBox("重複執行設定")
+        layout = QHBoxLayout(group)
+        layout.addWidget(QLabel("每套參數重複執行"))
+        self.repeat_count_spin = QSpinBox()
+        self.repeat_count_spin.setRange(1, 100)
+        self.repeat_count_spin.setValue(1)
+        self.repeat_count_spin.setSuffix(" 次")
+        self.repeat_count_spin.setToolTip(
+            "每套已啟用的參數會各自執行指定次數；每次都有獨立結果與輸出資料夾。"
+        )
+        self.repeat_count_spin.valueChanged.connect(self._update_run_count)
+        layout.addWidget(self.repeat_count_spin)
+        self.repeat_summary_label = QLabel("總執行次數：0")
+        layout.addWidget(self.repeat_summary_label)
+        layout.addStretch()
+        layout.addWidget(QLabel("建議至少執行 3 次，以比較結果的波動情形。"))
+        return group
+
+    def _update_run_count(self, *_: object) -> None:
+        enabled_count = sum(
+            self.experiment_table.item(row, 0) is not None
+            and self.experiment_table.item(row, 0).checkState() == Qt.CheckState.Checked
+            for row in range(self.experiment_table.rowCount())
+        )
+        total = enabled_count * self.repeat_count_spin.value()
+        self.repeat_summary_label.setText(
+            f"總執行次數：{enabled_count} 套參數 × "
+            f"{self.repeat_count_spin.value()} 次 = {total} 次"
+        )
 
     def _run_controls(self) -> QWidget:
         widget = QWidget()
@@ -217,27 +266,44 @@ class MainWindow(QMainWindow):
     def _results_tab(self) -> QWidget:
         widget = QWidget()
         layout = QVBoxLayout(widget)
-        self.result_table = QTableWidget(0, 11)
+        self.result_table = QTableWidget(0, 12)
         self.result_table.setHorizontalHeaderLabels(
             (
-                "實驗", "來源", "掃描 ID", "狀態", "已註冊", "註冊率", "元件數", "最大元件",
+                "實驗", "重複次序", "來源", "掃描 ID", "狀態", "已註冊", "註冊率",
+                "元件數", "最大元件",
                 "稀疏點數", "重投影誤差", "執行時間",
             )
         )
         self.result_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.result_table.setSortingEnabled(True)
         self.result_table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.result_table, stretch=1)
         self.comparison_label = QLabel("描述性比較會在效能測試完成後顯示。")
         self.comparison_label.setWordWrap(True)
         layout.addWidget(self.comparison_label)
         actions = QHBoxLayout()
+        actions.addWidget(QLabel("結果篩選"))
+        self.result_filter_combo = QComboBox()
+        self.result_filter_combo.addItem("全部", "all")
+        self.result_filter_combo.addItem("僅成功", "successful")
+        self.result_filter_combo.addItem("僅失敗", "failed")
+        self.result_filter_combo.addItem("僅 Pareto-efficient", "pareto")
+        self.result_filter_combo.currentIndexChanged.connect(self._refresh_results)
+        actions.addWidget(self.result_filter_combo)
         self.open_output_button = QPushButton("開啟輸出資料夾")
         self.open_output_button.clicked.connect(self._open_output_folder)
         self.export_button = QPushButton("匯出 CSV")
         self.export_button.clicked.connect(self._export_csv)
         self.charts_button = QPushButton("檢視圖表")
         self.charts_button.clicked.connect(self._view_charts)
-        for button in (self.open_output_button, self.export_button, self.charts_button):
+        self.open_report_button = QPushButton("開啟 HTML 報告")
+        self.open_report_button.clicked.connect(self._open_report)
+        self.package_button = QPushButton("匯出可重現性套件")
+        self.package_button.clicked.connect(self._export_reproducibility_package)
+        for button in (
+            self.open_output_button, self.export_button, self.charts_button,
+            self.open_report_button, self.package_button,
+        ):
             button.setEnabled(False)
             actions.addWidget(button)
         actions.addStretch()
@@ -369,6 +435,7 @@ class MainWindow(QMainWindow):
         row = self._selected_row()
         if row >= 0:
             self.experiment_table.removeRow(row)
+            self._update_run_count()
 
     def _move_up(self) -> None:
         self._move_selected(-1)
@@ -397,6 +464,7 @@ class MainWindow(QMainWindow):
             experiments=self._experiments(),
             stop_on_failure=self.stop_failure_check.isChecked(),
             dry_run=self.dry_run_check.isChecked(),
+            repeat_count=self.repeat_count_spin.value(),
             metadata={"sweep_definitions": list(self.sweep_definitions)},
         )
 
@@ -501,8 +569,13 @@ class MainWindow(QMainWindow):
 
     def _benchmark_progress(self, progress: BenchmarkProgress) -> None:
         phase = "執行中" if progress.phase == "RUNNING" else "已完成"
+        repeat = (
+            f"（第 {progress.repeat_index} / {progress.repeat_count} 次）"
+            if progress.repeat_count > 1 else ""
+        )
         self.progress_label.setText(
-            f"實驗 {progress.current} / {progress.total}：{progress.experiment_name} — {phase}"
+            f"執行 {progress.current} / {progress.total}："
+            f"{progress.experiment_name}{repeat} — {phase}"
         )
         self.progress_bar.setValue(progress.percent)
         for row in range(self.experiment_table.rowCount()):
@@ -537,11 +610,31 @@ class MainWindow(QMainWindow):
             QTimer.singleShot(0, self.close)
 
     def _show_results(self, project: BenchmarkProject) -> None:
+        self.current_project = project
+        self.result_table.setSortingEnabled(False)
         self.result_table.setRowCount(0)
         configs_by_id = {
             experiment.experiment_id: experiment for experiment in project.enabled_experiments
         }
-        for result in project.results:
+        pareto_ids = self._pareto_ids(project)
+        selected_filter = self.result_filter_combo.currentData()
+        visible_results = [
+            result for result in project.results
+            if selected_filter == "all"
+            or (
+                selected_filter == "successful"
+                and result.status in {ExperimentStatus.SUCCESS, ExperimentStatus.DRY_RUN}
+            )
+            or (
+                selected_filter == "failed"
+                and result.status in {ExperimentStatus.FAILED, ExperimentStatus.TIMEOUT}
+            )
+            or (
+                selected_filter == "pareto"
+                and (result.experiment_id or result.experiment_name) in pareto_ids
+            )
+        ]
+        for result in visible_results:
             row = self.result_table.rowCount()
             self.result_table.insertRow(row)
             rate = result.registration_rate
@@ -549,6 +642,7 @@ class MainWindow(QMainWindow):
             source_labels = {"MANUAL": "手動", "SWEEP": "參數掃描", "BASELINE": "基準"}
             values = (
                 result.experiment_name,
+                f"{result.repeat_index} / {result.repeat_count}",
                 (
                     source_labels.get(config.experiment_role, config.experiment_role)
                     if config else "未知"
@@ -563,19 +657,81 @@ class MainWindow(QMainWindow):
                 self._display(result.mean_reprojection_error, " px", 3),
                 self._display(result.runtime_seconds, " 秒", 1),
             )
-            for column, value in enumerate(values):
-                self.result_table.setItem(row, column, QTableWidgetItem(value))
+            sort_values = (
+                result.experiment_name,
+                result.repeat_index,
+                config.experiment_role if config else "",
+                config.sweep_id if config and config.sweep_id else "",
+                result.status.value,
+                result.registered_images if result.registered_images is not None else float("inf"),
+                rate * 100 if rate is not None else float("inf"),
+                result.component_count if result.component_count is not None else float("inf"),
+                (
+                    result.largest_component_camera_count
+                    if result.largest_component_camera_count is not None else float("inf")
+                ),
+                (
+                    result.sparse_point_count
+                    if result.sparse_point_count is not None else float("inf")
+                ),
+                (
+                    result.mean_reprojection_error
+                    if result.mean_reprojection_error is not None else float("inf")
+                ),
+                result.runtime_seconds if result.runtime_seconds is not None else float("inf"),
+            )
+            for column, (value, sort_value) in enumerate(zip(values, sort_values, strict=True)):
+                self.result_table.setItem(
+                    row, column, SortableTableWidgetItem(value, sort_value)
+                )
             for experiment_row in range(self.experiment_table.rowCount()):
                 if self.experiment_table.item(experiment_row, 1).text() == result.experiment_name:
                     self.experiment_table.item(experiment_row, 6).setText(
                         status_label(result.status)
                     )
                     break
-        self._set_comparison(project.results)
-        for button in (self.open_output_button, self.export_button, self.charts_button):
+        self._set_comparison(project)
+        self.result_table.setSortingEnabled(True)
+        for button in (
+            self.open_output_button, self.export_button, self.charts_button,
+            self.open_report_button, self.package_button,
+        ):
             button.setEnabled(project.run_directory is not None)
 
-    def _set_comparison(self, results: list[ExperimentResult]) -> None:
+    def _refresh_results(self) -> None:
+        if self.current_project and self.current_project.results:
+            self._show_results(self.current_project)
+
+    @staticmethod
+    def _pareto_ids(project: BenchmarkProject) -> set[str]:
+        if not project.run_directory:
+            return set()
+        path = project.run_directory / "summary" / "analysis.json"
+        if not path.is_file():
+            return set()
+        try:
+            return set(json.loads(path.read_text(encoding="utf-8"))["pareto_experiment_ids"])
+        except (OSError, ValueError, KeyError, TypeError):
+            return set()
+
+    def _set_comparison(
+        self, source: BenchmarkProject | list[ExperimentResult]
+    ) -> None:
+        if isinstance(source, BenchmarkProject) and source.run_directory:
+            path = source.run_directory / "summary" / "analysis.json"
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                lines = payload.get("observations", [])
+                self.comparison_label.setText(
+                    "；".join(lines) if lines else "沒有可比較的有效數值。"
+                )
+                return
+            except (OSError, ValueError, TypeError):
+                pass
+        # Compatibility fallback for Phase 3 callers that pass unsaved results.
+        results = source.results if isinstance(source, BenchmarkProject) else source
+        from statistics import mean, pstdev
+
         from rs_benchmark.reports.comparison import compare_results
 
         comparison = compare_results(results)
@@ -589,6 +745,38 @@ class MainWindow(QMainWindow):
             f"{labels[key]}：{result.experiment_name}"
             for key, result in comparison.items() if result is not None
         ]
+        groups: dict[str, list[ExperimentResult]] = {}
+        for result in results:
+            groups.setdefault(result.experiment_id or result.experiment_name, []).append(result)
+        for repeated in groups.values():
+            if len(repeated) < 2:
+                continue
+            successful = sum(
+                result.status in {ExperimentStatus.SUCCESS, ExperimentStatus.DRY_RUN}
+                for result in repeated
+            )
+            rates = [
+                result.registration_rate * 100
+                for result in repeated if result.registration_rate is not None
+            ]
+            runtimes = [
+                result.runtime_seconds
+                for result in repeated if result.runtime_seconds is not None
+            ]
+            metrics = [f"有效結果 {successful} / {len(repeated)}"]
+            if len(rates) >= 2:
+                metrics.append(
+                    f"平均註冊率 {mean(rates):.1f}%（標準差 {pstdev(rates):.1f}%）"
+                )
+            if len(runtimes) >= 2:
+                metrics.append(
+                    f"平均執行時間 {mean(runtimes):.1f} 秒"
+                    f"（標準差 {pstdev(runtimes):.1f} 秒）"
+                )
+            lines.append(
+                f"穩定性｜{repeated[0].experiment_name}（{len(repeated)} 次）："
+                + "；".join(metrics)
+            )
         self.comparison_label.setText("；".join(lines) if lines else "沒有可比較的有效數值。")
 
     @staticmethod
@@ -606,15 +794,20 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(dialog)
         text = []
         project = self._project()
-        for index, experiment in enumerate(project.enabled_experiments, start=1):
+        index = 0
+        total = len(project.enabled_experiments) * project.repeat_count
+        for experiment in project.enabled_experiments:
             config = project.experiment_config(experiment, project.output_directory)
-            text.extend(
-                (
-                    f"實驗 {index}：{experiment.name}",
-                    SingleExperimentRunner.preview_command(config),
-                    "",
+            for repeat_index in range(1, project.repeat_count + 1):
+                index += 1
+                text.extend(
+                    (
+                        f"執行 {index} / {total}：{experiment.name}"
+                        f"（第 {repeat_index} / {project.repeat_count} 次）",
+                        SingleExperimentRunner.preview_command(config),
+                        "",
+                    )
                 )
-            )
         view = QPlainTextEdit("\n".join(text))
         view.setReadOnly(True)
         layout.addWidget(view)
@@ -678,6 +871,30 @@ class MainWindow(QMainWindow):
             QDesktopServices.openUrl(QUrl.fromLocalFile(str(charts[0])))
         else:
             QMessageBox.information(self, "沒有可用圖表", "目前結果沒有足夠的有效數值可產生圖表。")
+
+    def _open_report(self) -> None:
+        if not self.current_project or not self.current_project.run_directory:
+            return
+        report = self.current_project.run_directory / "summary" / "report.html"
+        if report.is_file():
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(report)))
+        else:
+            QMessageBox.warning(self, "找不到 HTML 報告", "效能測試輸出中沒有 report.html。")
+
+    def _export_reproducibility_package(self) -> None:
+        if not self.current_project or not self.current_project.run_directory:
+            return
+        packages = sorted(
+            (self.current_project.run_directory / "summary").glob("*_reproducibility.zip")
+        )
+        if not packages:
+            QMessageBox.warning(self, "找不到可重現性套件", "效能測試輸出中沒有可匯出的 ZIP 套件。")
+            return
+        selected, _ = QFileDialog.getSaveFileName(
+            self, "匯出可重現性套件", packages[0].name, "ZIP 壓縮檔 (*.zip)"
+        )
+        if selected:
+            shutil.copy2(packages[0], selected)
 
     @staticmethod
     def _format_result(result: ExperimentResult, directory: Path | None) -> str:

@@ -42,6 +42,7 @@ class BenchmarkProject:
     notes: str = ""
     stop_on_failure: bool = False
     dry_run: bool = False
+    repeat_count: int = 1
     metadata: dict[str, Any] = field(default_factory=dict)
     run_directory: Path | None = None
 
@@ -58,6 +59,8 @@ class BenchmarkProject:
         return [experiment for experiment in self.experiments if experiment.enabled]
 
     def validate(self, *, require_executable: bool = False) -> list[str]:
+        if not 1 <= self.repeat_count <= 100:
+            raise ValueError("Repeat count must be between 1 and 100")
         if not self.name.strip():
             raise ValueError("Benchmark name cannot be empty")
         if not self.image_files():
@@ -131,6 +134,7 @@ class BenchmarkProject:
             "notes": self.notes,
             "stop_on_failure": self.stop_on_failure,
             "dry_run": self.dry_run,
+            "repeat_count": self.repeat_count,
             "metadata": self.metadata,
             "run_directory": str(self.run_directory) if self.run_directory else None,
         }
@@ -155,6 +159,7 @@ class BenchmarkProject:
             notes=data.get("notes", ""),
             stop_on_failure=bool(data.get("stop_on_failure", False)),
             dry_run=bool(data.get("dry_run", False)),
+            repeat_count=int(data.get("repeat_count", 1)),
             metadata=dict(data.get("metadata", {})),
             run_directory=Path(data["run_directory"]) if data.get("run_directory") else None,
         )

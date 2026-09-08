@@ -69,6 +69,7 @@ def localize_error_message(message: str | None) -> str:
             "執行檔名稱必須是 RealityScan.exe 或 RealityCapture.exe"
         ),
         "RealityScan process timed out": "RealityScan 處理程序已逾時",
+        "Repeat count must be between 1 and 100": "重複執行次數必須介於 1 到 100 次之間",
     }
     if message in exact_translations:
         return exact_translations[message]

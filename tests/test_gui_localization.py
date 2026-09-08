@@ -62,6 +62,11 @@ def test_internal_values_use_chinese_display_labels() -> None:
     assert window.reprojection_spin.isHidden()
     assert window.timeout_spin.isHidden()
     assert window.experiment_table.rowCount() == 3
+    assert window.repeat_count_spin.value() == 1
+    assert window.repeat_summary_label.text() == "總執行次數：3 套參數 × 1 次 = 3 次"
+    window.repeat_count_spin.setValue(4)
+    assert window._project().repeat_count == 4
+    assert window.repeat_summary_label.text() == "總執行次數：3 套參數 × 4 次 = 12 次"
     assert window.experiment_table.item(0, 1).text() == "預設"
     window.experiment_table.selectRow(0)
     window._duplicate_experiment()
@@ -104,6 +109,31 @@ def test_result_summary_is_traditional_chinese() -> None:
     assert "執行時間：2.5 秒" in summary
     assert "Status:" not in summary
     assert "Images:" not in summary
+
+
+def test_repeated_results_show_stability_summary() -> None:
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    results = [
+        ExperimentResult(
+            experiment_name="預設", experiment_id="exp_repeat",
+            status=ExperimentStatus.SUCCESS, total_images=10, registered_images=9,
+            runtime_seconds=10.0, repeat_index=1, repeat_count=2,
+        ),
+        ExperimentResult(
+            experiment_name="預設", experiment_id="exp_repeat",
+            status=ExperimentStatus.SUCCESS, total_images=10, registered_images=8,
+            runtime_seconds=12.0, repeat_index=2, repeat_count=2,
+        ),
+    ]
+
+    window._set_comparison(results)
+
+    assert "穩定性｜預設（2 次）：有效結果 2 / 2" in window.comparison_label.text()
+    assert "平均註冊率 85.0%（標準差 5.0%）" in window.comparison_label.text()
+    assert "平均執行時間 11.0 秒（標準差 1.0 秒）" in window.comparison_label.text()
+    window.close()
+    assert app is not None
 
 
 def test_statuses_and_known_errors_are_localized() -> None:

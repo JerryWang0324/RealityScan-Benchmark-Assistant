@@ -8,6 +8,8 @@ from rs_benchmark.models import ExperimentConfig, ExperimentResult
 CSV_FIELDS = (
     "experiment_id",
     "experiment_name",
+    "repeat_index",
+    "repeat_count",
     "source",
     "sweep_id",
     "status",
@@ -33,6 +35,8 @@ def result_row(
     return {
         "experiment_id": config.experiment_id if config else result.experiment_id,
         "experiment_name": result.experiment_name,
+        "repeat_index": result.repeat_index,
+        "repeat_count": result.repeat_count,
         "source": config.experiment_role if config else None,
         "sweep_id": config.sweep_id if config else None,
         "status": result.status.value,

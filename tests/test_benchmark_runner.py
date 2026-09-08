@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from rs_benchmark.models import (
@@ -123,3 +124,32 @@ def test_benchmark_dry_run_prepares_every_command_without_realityscan(tmp_path: 
     assert len(directories) == 3
     assert all((directory / "command.txt").is_file() for directory in directories)
     assert all((directory / "result.json").is_file() for directory in directories)
+
+
+def test_each_parameter_set_runs_requested_number_of_times(tmp_path: Path) -> None:
+    fake = FakeSingleRunner()
+    updates = {
+        "experiments": [
+            ExperimentConfig(name="A"),
+            ExperimentConfig(name="B", max_features_per_image=50_000),
+        ],
+        "repeat_count": 3,
+    }
+    progress_updates = []
+
+    result = BenchmarkRunner(fake).run_benchmark(  # type: ignore[arg-type]
+        project(tmp_path, **updates), progress_updates.append
+    )
+
+    assert fake.calls == ["A", "A", "A", "B", "B", "B"]
+    assert [item.repeat_index for item in result.results] == [1, 2, 3, 1, 2, 3]
+    assert all(item.repeat_count == 3 for item in result.results)
+    assert progress_updates[-1].current == progress_updates[-1].total == 6
+    assert progress_updates[-1].repeat_index == 3
+    assert result.run_directory is not None
+    directories = sorted((result.run_directory / "experiments").iterdir())
+    assert len(directories) == 6
+    assert directories[0].name.endswith("_repeat_01")
+    saved_result = json.loads((directories[1] / "result.json").read_text(encoding="utf-8"))
+    assert saved_result["repeat_index"] == 2
+    assert saved_result["repeat_count"] == 3

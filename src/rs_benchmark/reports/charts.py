@@ -3,8 +3,59 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
+from rs_benchmark.analysis.comparison import successful_results
 from rs_benchmark.models import ExperimentConfig, ExperimentResult
 from rs_benchmark.reports.sweep_analysis import varied_parameters
+
+
+def generate_pareto_chart(
+    path: Path,
+    results: list[ExperimentResult],
+    pareto_experiment_ids: list[str],
+) -> Path | None:
+    valid = [
+        row for row in successful_results(results)
+        if row.registration_rate is not None and row.runtime_seconds is not None
+    ]
+    if len(valid) < 2:
+        return None
+    import matplotlib
+
+    matplotlib.use("Agg")
+    from matplotlib import pyplot as plt
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frontier = set(pareto_experiment_ids)
+    figure, axis = plt.subplots(figsize=(7.5, 5.2))
+    for label, is_frontier, color in (
+        ("Pareto-efficient", True, "#2878B5"), ("Dominated", False, "#9AA6B2")
+    ):
+        rows = [
+            row for row in valid
+            if ((row.experiment_id or row.experiment_name) in frontier) is is_frontier
+        ]
+        if rows:
+            axis.scatter(
+                [row.runtime_seconds for row in rows],
+                [row.registration_rate * 100 for row in rows],
+                label=label, color=color, s=55,
+            )
+            if len(valid) <= 15:
+                for row in rows:
+                    axis.annotate(
+                        row.experiment_id or row.experiment_name,
+                        (row.runtime_seconds, row.registration_rate * 100),
+                        xytext=(5, 5), textcoords="offset points", fontsize=8,
+                    )
+    axis.set_xlabel("執行時間（秒）")
+    axis.set_ylabel("註冊率（%）")
+    axis.set_title("註冊率與執行時間 Pareto 分析")
+    axis.grid(alpha=0.25)
+    axis.legend()
+    figure.tight_layout()
+    figure.savefig(path, dpi=180, bbox_inches="tight")
+    plt.close(figure)
+    return path
 
 
 def generate_charts(

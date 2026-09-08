@@ -6,7 +6,9 @@ The application uses four primary boundaries:
 2. `models` defines typed, serializable domain data.
 3. `realityscan` owns official CLI keys, command construction, process execution, and report parsing.
 4. `services` orchestrates both a single experiment and the benchmark queue without depending on Qt.
-5. `reports` aggregates results into CSV, summary JSON, descriptive comparisons, and PNG charts.
+5. `analysis` converts results into one serializable `BenchmarkAnalysisResult`; it owns leaders,
+   Pareto frontiers, sweep sensitivity, observations, and scientific warnings.
+6. `reports` renders already-structured analysis into CSV, JSON, PNG, offline HTML, and ZIP outputs.
 
 The GUI must never call `subprocess` directly. `RealityScanControllerProtocol` is the mockable seam
 used by `SingleExperimentRunner`, future benchmark orchestration, and unit tests.
@@ -21,7 +23,7 @@ GUI -> QThread BenchmarkWorker -> BenchmarkRunner
                                   |             |-> command builder
                                   |             |-> RealityScanController -> subprocess argv list
                                   |             `-> ReportParser -> ExperimentResult
-                                  `-> CSV + summary JSON + charts
+                                  `-> Analysis Layer -> CSV + JSON + charts + HTML + ZIP
 ```
 
 Every non-dry process attempt leaves config, command, stdout, stderr, runtime, and result artifacts.
@@ -30,3 +32,18 @@ The GUI never imports or calls `subprocess`.
 `BenchmarkRunner` does not construct RealityScan commands, invoke subprocesses, or parse reports.
 Its responsibilities are queue order, progress, cooperative cancellation between experiments,
 failure isolation, project status, result aggregation, and report generation.
+
+The Phase 5 result boundary is:
+
+```text
+RealityScan
+    -> ExperimentResult
+    -> BenchmarkProject results
+    -> analyze_benchmark()
+    -> BenchmarkAnalysisResult / analysis.json
+    -> GUI filters + charts + HTML report + reproducibility ZIP
+```
+
+The HTML renderer formats the supplied structured analysis. It does not select leaders, calculate
+Pareto membership, or infer sweep effects. Public artifacts pass through `PathDisplaySanitizer`;
+the private run-root `benchmark.json` remains available for local resume/debug workflows.

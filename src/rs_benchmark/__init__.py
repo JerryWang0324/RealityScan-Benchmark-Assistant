@@ -1,3 +1,5 @@
 """RealityScan Benchmark Assistant."""
 
-__version__ = "0.2.0"
+from rs_benchmark._version import __version__
+
+__all__ = ["__version__"]

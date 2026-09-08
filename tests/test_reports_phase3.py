@@ -13,7 +13,10 @@ def test_csv_fields_none_failed_and_utf8(tmp_path: Path) -> None:
     path = export_results_csv(
         tmp_path / "results.csv",
         [
-            ExperimentResult("預設", ExperimentStatus.SUCCESS, 10, 9, runtime_seconds=4.5),
+            ExperimentResult(
+                "預設", ExperimentStatus.SUCCESS, 10, 9, runtime_seconds=4.5,
+                repeat_index=2, repeat_count=3,
+            ),
             ExperimentResult("失敗", ExperimentStatus.FAILED),
         ],
         [ExperimentConfig(name="預設"), ExperimentConfig(name="失敗")],
@@ -24,6 +27,8 @@ def test_csv_fields_none_failed_and_utf8(tmp_path: Path) -> None:
         rows = list(csv.DictReader(stream))
     assert tuple(rows[0]) == CSV_FIELDS
     assert rows[0]["registration_rate"] == "90.0"
+    assert rows[0]["repeat_index"] == "2"
+    assert rows[0]["repeat_count"] == "3"
     assert rows[1]["registered_images"] == "N/A"
     assert rows[1]["status"] == "FAILED"
 
