@@ -183,6 +183,56 @@ def test_path_sanitizer_windows_path() -> None:
     assert "User Name" not in sanitized
 
 
+def test_path_sanitizer_redacts_paths_embedded_in_diagnostics() -> None:
+    payload = {
+        "error_message": r"Unable to read C:\Users\User Name\Desktop\Test\image.jpg",
+        "note": "Unable to read /home/private-user/datasets/test/image.jpg",
+    }
+    sanitized = PathDisplaySanitizer.sanitize_structure(payload)
+    assert sanitized["error_message"] == r"Unable to read <user>\Desktop\Test\image.jpg"
+    assert sanitized["note"] == "Unable to read <user>/datasets/test/image.jpg"
+    assert "User Name" not in json.dumps(sanitized)
+    assert "private-user" not in json.dumps(sanitized)
+
+
+def test_html_report_embeds_single_parameter_sweep_charts(tmp_path: Path) -> None:
+    project = project_fixture(tmp_path)
+    project.experiments = [
+        ExperimentConfig(
+            name=name,
+            experiment_id=identifier,
+            max_features_per_image=value,
+            sweep_id="sweep_features",
+            sweep_mode="one_factor_at_a_time",
+            experiment_role="BASELINE" if value == 20_000 else "SWEEP",
+            varied_parameters=("max_features_per_image",),
+        )
+        for name, identifier, value in (
+            ("20k", "e20", 20_000),
+            ("40k", "e40", 40_000),
+        )
+    ]
+    project.results = [result("20k", "e20", 92, 140), result("40k", "e40", 97, 220)]
+    charts = tmp_path / "summary" / "charts"
+    charts.mkdir(parents=True)
+    registration_chart = charts / (
+        "sweep_features_max_features_per_image_registration_rate.png"
+    )
+    runtime_chart = charts / "sweep_features_max_features_per_image_runtime.png"
+    registration_chart.touch()
+    runtime_chart.touch()
+
+    report = generate_html_report(
+        tmp_path / "summary" / "report.html",
+        project,
+        analyze_benchmark(project),
+        [registration_chart, runtime_chart],
+    )
+    report_text = report.read_text(encoding="utf-8")
+    assert f'src="charts/{registration_chart.name}"' in report_text
+    assert f'src="charts/{runtime_chart.name}"' in report_text
+
+
 def project_fixture(tmp_path: Path) -> BenchmarkProject:
     project = BenchmarkProject(
         name="Phase 5 測試",

@@ -9,6 +9,10 @@ class PathDisplaySanitizer:
     """Remove private parent directories from public artifacts."""
 
     _windows_absolute = re.compile(r"^[A-Za-z]:[\\/]")
+    _windows_user_prefix = re.compile(
+        r"(?i)(?<![A-Za-z0-9_])[A-Z]:[\\/]Users[\\/][^\\/\r\n]+"
+    )
+    _posix_user_prefix = re.compile(r"(?<![A-Za-z0-9_])/(?:home|Users)/[^/\r\n]+")
 
     @classmethod
     def sanitize(cls, value: str | Path | None, *, label: str = "dataset") -> str | None:
@@ -34,10 +38,17 @@ class PathDisplaySanitizer:
             }
         if isinstance(value, list):
             return [cls.sanitize_structure(item, key=key) for item in value]
-        if isinstance(value, str) and (
-            cls._windows_absolute.match(value) or value.startswith("/")
-        ):
-            label = "executable" if "executable" in key else "dataset" if "image" in key else "path"
-            return cls.sanitize(value, label=label)
+        if isinstance(value, str):
+            label = (
+                "executable" if "executable" in key
+                else "dataset" if "image" in key
+                else "path"
+            )
+            if cls._windows_absolute.match(value) or value.startswith("/"):
+                return cls.sanitize(value, label=label)
+            # Error messages and free-form metadata may contain a path without being
+            # path fields themselves. Redact the private account prefix while keeping
+            # the surrounding diagnostic text useful.
+            value = cls._windows_user_prefix.sub("<user>", value)
+            return cls._posix_user_prefix.sub("<user>", value)
         return value
-

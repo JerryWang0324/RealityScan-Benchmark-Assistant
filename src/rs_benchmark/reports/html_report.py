@@ -56,7 +56,7 @@ def generate_html_report(
 <section><h2>3. 實驗設定</h2>{_configuration_table(project.enabled_experiments)}</section>
 <section><h2>4. 結果</h2>{_results_table(project.results, config_by_id)}</section>
 <section><h2>5. 關鍵比較</h2>{_leaders(analysis)}</section>
-<section><h2>6. 參數效果</h2>{_sweep_section(analysis)}</section>
+<section><h2>6. 參數效果</h2>{_sweep_section(analysis, charts)}</section>
 <section><h2>7. Pareto 分析</h2>{_pareto_section(analysis, charts, config_by_id)}</section>
 <section><h2>8. 科學詮釋</h2>{_items(analysis.observations, "沒有可用觀察結果。")}</section>
 <section><h2>9. 限制</h2>{_items(list(LIMITATIONS))}</section>
@@ -140,11 +140,17 @@ def _leaders(analysis: BenchmarkAnalysisResult) -> str:
     return _table(["比較", "實驗", "數值"], rows)
 
 
-def _sweep_section(analysis: BenchmarkAnalysisResult) -> str:
+def _sweep_section(
+    analysis: BenchmarkAnalysisResult, charts: list[Path]
+) -> str:
     if not analysis.sweep_analysis:
         return "<p class='muted'>本次結果沒有可作單參數敏感度分析的 sweep。</p>"
     blocks = []
     for sweep in analysis.sweep_analysis:
+        sweep_charts = [
+            chart for chart in charts
+            if chart.name.startswith(f"{sweep.sweep_id}_{sweep.parameter}_")
+        ]
         rows = [[
             gain.from_value, gain.to_value, _fmt(gain.delta_registration_pp, " pp"),
             _fmt(gain.delta_runtime_seconds, " s"),
@@ -152,10 +158,31 @@ def _sweep_section(analysis: BenchmarkAnalysisResult) -> str:
         ] for gain in sweep.marginal_gains]
         blocks.append(
             f"<h3>{escape(sweep.parameter)}</h3>" +
+            _chart_gallery(sweep_charts) +
             _table(["起始值", "終止值", "註冊率差", "執行時間差", "每額外分鐘註冊率增益"], rows) +
             _items(sweep.observations, "未偵測到符合規則的報酬遞減跡象。")
         )
     return "".join(blocks)
+
+
+def _chart_gallery(charts: list[Path]) -> str:
+    labels = {
+        "registration_rate": "註冊率",
+        "runtime": "執行時間",
+        "mean_reprojection_error": "平均重投影誤差",
+        "sparse_point_count": "稀疏點數",
+    }
+    figures = []
+    for chart in charts:
+        metric = next((key for key in labels if chart.stem.endswith(f"_{key}")), chart.stem)
+        caption = labels.get(metric, metric)
+        figures.append(
+            "<figure>"
+            f'<img src="charts/{escape(chart.name)}" alt="參數效果圖：{escape(caption)}">'
+            f"<figcaption>{escape(caption)}</figcaption>"
+            "</figure>"
+        )
+    return f"<div class='chart-grid'>{''.join(figures)}</div>" if figures else ""
 
 
 def _pareto_section(
@@ -259,6 +286,9 @@ table{width:100%;border-collapse:collapse;font-size:14px}
 th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
 th{background:#eef3f7;color:#29475f}
 img{display:block;max-width:820px;width:100%;margin:18px auto}
+.chart-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px}
+.chart-grid figure{margin:0;border:1px solid var(--line);padding:10px}
+.chart-grid img{margin:0 auto}.chart-grid figcaption{text-align:center;color:var(--muted)}
 .warning{border-left:5px solid #a66b17}
 li{margin:.35em 0}
 @media print{body{background:#fff}main{margin:0;max-width:none}
