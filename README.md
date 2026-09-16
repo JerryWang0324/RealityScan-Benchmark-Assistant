@@ -189,6 +189,15 @@ largest component camera count, sparse point count, mean reprojection error, and
 values are displayed as `N/A`. Actions open the output folder, copy the CSV to another location, or
 open the first generated chart.
 
+The `Pareto 分析：各指標第一名` result filter groups repeated runs by parameter configuration and
+uses each group's mean from successful runs. It selects one first-place group for each of the seven
+table metrics: registered images, registration rate, component count, largest component camera
+count, sparse points, reprojection error, and runtime. A star marks every metric that a displayed
+group wins. Groups with no first-place metric are hidden, so at most seven groups appear. Ties are
+resolved by registration rate, runtime, component count, and then experiment ID. Fewer components,
+lower reprojection error, and shorter runtime rank first; the other four metrics rank higher values
+first. Missing metric values are omitted from that metric's group mean.
+
 The structured analysis can identify:
 
 - higher registration rate;

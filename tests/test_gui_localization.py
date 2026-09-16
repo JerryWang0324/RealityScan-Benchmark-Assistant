@@ -137,7 +137,7 @@ def test_result_summary_is_traditional_chinese() -> None:
     assert "Images:" not in summary
 
 
-def test_pareto_filter_shows_component_runtime_tradeoff_and_names_criteria(tmp_path: Path) -> None:
+def test_pareto_filter_shows_group_metric_champions(tmp_path: Path) -> None:
     app = QApplication.instance() or QApplication([])
     window = MainWindow()
     project = BenchmarkProject(name="測試", image_folder=tmp_path)
@@ -157,19 +157,43 @@ def test_pareto_filter_shows_component_runtime_tradeoff_and_names_criteria(tmp_p
             status=ExperimentStatus.SUCCESS, total_images=68, registered_images=68,
             component_count=1, runtime_seconds=16.8,
         ),
+        ExperimentResult(
+            experiment_name="未入選設定", experiment_id="runner_up",
+            status=ExperimentStatus.SUCCESS, total_images=68, registered_images=67,
+            component_count=3, runtime_seconds=25.0,
+        ),
     ]
     window.result_filter_combo.setCurrentIndex(
         window.result_filter_combo.findData("pareto")
     )
     window._show_results(project)
 
-    assert window.result_filter_combo.currentText() == "僅 Pareto 前緣（註冊率／時間／元件數）"
+    assert window.result_filter_combo.currentText() == "Pareto 分析：各指標第一名"
     assert window.result_table.rowCount() == 2
-    assert window.result_table.item(0, 7).text() == "1"
-    assert {window.result_table.item(row, 7).text() for row in range(2)} == {"1", "2"}
-    assert {window.result_table.item(row, 11).text() for row in range(2)} == {
-        "16.4 秒", "16.8 秒",
+    assert window.result_table.horizontalHeaderItem(1).text() == "有效次數"
+    visible = {
+        window.result_table.item(row, 0).text(): [
+            window.result_table.item(row, column).text() for column in range(12)
+        ]
+        for row in range(window.result_table.rowCount())
     }
+    assert visible["快速設定"][1] == "2 / 2"
+    assert visible["快速設定"][5].startswith("★ ")
+    assert visible["快速設定"][6].startswith("★ ")
+    assert visible["快速設定"][11] == "★ 16.7 秒"
+    assert visible["單一元件"][7] == "★ 1.0"
+    winner_item = next(
+        window.result_table.item(row, 5)
+        for row in range(window.result_table.rowCount())
+        if window.result_table.item(row, 0).text() == "快速設定"
+    )
+    assert winner_item.background().color().name() == "#174e68"
+    assert winner_item.foreground().color().name() == "#ffffff"
+    assert "未入選設定" not in visible
+    assert "成功執行的平均值" in window.comparison_label.text()
+    window.result_filter_combo.setCurrentIndex(window.result_filter_combo.findData("all"))
+    assert window.result_table.rowCount() == 4
+    assert window.result_table.horizontalHeaderItem(1).text() == "重複次序"
     window.close()
     assert app is not None
 

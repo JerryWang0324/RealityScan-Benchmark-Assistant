@@ -743,7 +743,10 @@ class MainWindow(QMainWindow):
                 self.result_table.setItem(row, column, SortableTableWidgetItem(value, value))
             for column, metric in enumerate(CHAMPION_METRICS, start=5):
                 value = champion.values[metric.key]
-                displayed = value * 100 if metric.key == "registration_rate" and value is not None else value
+                displayed = (
+                    value * 100
+                    if metric.key == "registration_rate" and value is not None else value
+                )
                 suffix = "%" if metric.key == "registration_rate" else (
                     " px" if metric.key == "mean_reprojection_error" else
                     " 秒" if metric.key == "runtime_seconds" else ""
@@ -756,7 +759,8 @@ class MainWindow(QMainWindow):
                     displayed if displayed is not None else float("inf"),
                 )
                 if winning:
-                    item.setBackground(QColor("#FFF1C2"))
+                    item.setBackground(QColor("#174E68"))
+                    item.setForeground(QColor("#FFFFFF"))
                     item.setToolTip(f"{metric.label}第一名（成功執行的平均值）")
                 self.result_table.setItem(row, column, item)
         self.comparison_label.setText(
