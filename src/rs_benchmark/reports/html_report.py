@@ -5,6 +5,7 @@ from pathlib import Path
 
 from rs_benchmark import __version__
 from rs_benchmark.analysis.metrics import BenchmarkAnalysisResult
+from rs_benchmark.analysis.pareto import registration_runtime_frontier_rows
 from rs_benchmark.models import BenchmarkProject, ExperimentConfig, ExperimentResult
 from rs_benchmark.utils.path_sanitizer import PathDisplaySanitizer
 
@@ -57,7 +58,7 @@ def generate_html_report(
 <section><h2>4. 結果</h2>{_results_table(project.results, config_by_id)}</section>
 <section><h2>5. 關鍵比較</h2>{_leaders(analysis)}</section>
 <section><h2>6. 參數效果</h2>{_sweep_section(analysis, charts)}</section>
-<section><h2>7. Pareto 分析</h2>{_pareto_section(analysis, charts, config_by_id)}</section>
+<section><h2>7. Pareto 分析</h2>{_pareto_section(charts, project.results)}</section>
 <section><h2>8. 科學詮釋</h2>{_items(analysis.observations, "沒有可用觀察結果。")}</section>
 <section><h2>9. 限制</h2>{_items(list(LIMITATIONS))}</section>
 <section><h2>10. 可重現性</h2>{_key_value_table(_reproducibility(project))}</section>
@@ -186,23 +187,25 @@ def _chart_gallery(charts: list[Path]) -> str:
 
 
 def _pareto_section(
-    analysis: BenchmarkAnalysisResult,
     charts: list[Path],
-    configs: dict[str, ExperimentConfig],
+    results: list[ExperimentResult],
 ) -> str:
     chart = next((p for p in charts if p.name == "pareto_registration_runtime.png"), None)
     image = (
-        f'<img src="charts/{escape(chart.name)}" alt="註冊率與執行時間 Pareto 圖">'
+        f'<img src="charts/{escape(chart.name)}" alt="註冊率、執行時間與元件數 Pareto 圖">'
         if chart else ""
     )
-    if not analysis.pareto_experiment_ids:
+    frontier = registration_runtime_frontier_rows(results)
+    if not frontier:
         return image + "<p class='muted'>至少需要兩筆具有註冊率與執行時間的成功結果。</p>"
     rows = [
-        f"Pareto-efficient：{configs[item].name}（{item}）" if item in configs
-        else f"Pareto-efficient：{item}"
-        for item in analysis.pareto_experiment_ids
+        f"Pareto 前緣：{row.experiment_name}（第 {row.repeat_index} / {row.repeat_count} 次；"
+        f"元件數 {row.component_count if row.component_count is not None else '無資料'}；"
+        f"註冊率 {row.registration_rate * 100:.1f}%；執行時間 {row.runtime_seconds:.3f} 秒）"
+        for row in frontier
     ]
-    return image + _items(rows)
+    explanation = "<p>共同比較註冊率、執行時間與元件數；各項指標有取捨的結果可同時入選。</p>"
+    return image + explanation + _items(rows)
 
 
 def _reproducibility(project: BenchmarkProject) -> dict[str, object]:

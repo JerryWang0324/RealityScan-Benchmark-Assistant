@@ -159,8 +159,12 @@ parameters, and `MANUAL`, `SWEEP`, or `BASELINE` role.
 3. Optionally enable **Stop queue when an experiment fails** or **Benchmark dry run**.
 4. Preview all CLI commands if desired.
 5. Select **Run Benchmark**.
-6. Follow experiment number, experiment name, state, overall experiment-level progress, and elapsed
-   time. The GUI remains responsive because the complete queue runs on a `QThread` worker.
+6. Follow experiment number, experiment name, state, overall experiment-level progress, elapsed
+   time, and estimated remaining time. After the first experiment finishes, the estimate uses the
+   observed wall time of completed experiments and updates each second. It remains unavailable
+   before a completed sample, during dry runs, and when the current experiment has already exceeded
+   the observed average. The GUI remains responsive because the complete queue runs on a `QThread`
+   worker.
 7. Select **Cancel Benchmark** to stop after the current RealityScan process returns. Completed
    results and artifacts are retained; remaining experiments are marked `CANCELLED`.
 
@@ -194,10 +198,13 @@ The structured analysis can identify:
 
 It deliberately does not calculate or claim a “best overall” configuration.
 
-Successful runs with registration rate and runtime are compared using Pareto dominance. Experiment
-A dominates B when A has at least as high a registration rate and at most as long a runtime, with at
-least one strict improvement. Exact coordinate ties remain together on the frontier. Single-result,
-missing-metric, and all-failed benchmarks do not fabricate a Pareto comparison.
+Successful runs with registration rate and runtime are compared using three Pareto metrics:
+higher registration rate, shorter runtime, and fewer reported components. A dominates B only when
+A is no worse on all three metrics and strictly better on at least one. A one-component run and a
+faster two-component run can therefore both remain on the frontier. A missing component count is
+treated as unknown and cannot dominate a reported count solely through that metric. Exact metric
+ties remain together on the frontier. Single-result, missing-registration/runtime, and all-failed
+benchmarks do not fabricate a Pareto comparison.
 
 For a sweep in which exactly one parameter varies, reports also include line charts for every metric
 with at least two valid values: parameter versus registration rate, runtime, reported mean

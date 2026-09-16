@@ -4,6 +4,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from rs_benchmark.analysis.comparison import successful_results
+from rs_benchmark.analysis.pareto import registration_runtime_frontier_rows
 from rs_benchmark.models import ExperimentConfig, ExperimentResult
 from rs_benchmark.reports.sweep_analysis import varied_parameters
 
@@ -11,7 +12,6 @@ from rs_benchmark.reports.sweep_analysis import varied_parameters
 def generate_pareto_chart(
     path: Path,
     results: list[ExperimentResult],
-    pareto_experiment_ids: list[str],
 ) -> Path | None:
     valid = [
         row for row in successful_results(results)
@@ -25,14 +25,15 @@ def generate_pareto_chart(
     from matplotlib import pyplot as plt
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    frontier = set(pareto_experiment_ids)
+    frontier = {id(row) for row in registration_runtime_frontier_rows(results)}
     figure, axis = plt.subplots(figsize=(7.5, 5.2))
     for label, is_frontier, color in (
-        ("Pareto-efficient", True, "#2878B5"), ("Dominated", False, "#9AA6B2")
+        ("Pareto 前緣（三指標）", True, "#2878B5"),
+        ("未入選", False, "#9AA6B2"),
     ):
         rows = [
             row for row in valid
-            if ((row.experiment_id or row.experiment_name) in frontier) is is_frontier
+            if (id(row) in frontier) is is_frontier
         ]
         if rows:
             axis.scatter(
@@ -49,7 +50,7 @@ def generate_pareto_chart(
                     )
     axis.set_xlabel("執行時間（秒）")
     axis.set_ylabel("註冊率（%）")
-    axis.set_title("註冊率與執行時間 Pareto 分析")
+    axis.set_title("註冊率、執行時間與元件數 Pareto 分析")
     axis.grid(alpha=0.25)
     axis.legend()
     figure.tight_layout()

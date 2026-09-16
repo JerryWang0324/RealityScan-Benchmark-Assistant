@@ -9,8 +9,10 @@ an unmeasured aspect of geometry becomes worse. A true accuracy study needs surv
 known distances, reference geometry, or another independent measurement process.
 
 Pareto membership is conditional on the selected metrics and available values. The primary frontier
-uses registration rate and runtime. The optional registration/reprojection frontier is explicitly a
-metric-based comparison. Neither constitutes an overall ranking or an optimal-parameter claim.
+jointly compares registration rate, runtime, and component count. The optional
+registration/reprojection frontier jointly compares those metrics with component count. A
+one-component result and a faster two-component result can both remain when each has an advantage.
+Neither frontier constitutes an overall ranking or an optimal-parameter claim.
 
 Sweep observations are dataset-specific and rule-based. The diminishing-return message describes a
 small registration-rate change accompanied by a large runtime increase; it does not recommend an

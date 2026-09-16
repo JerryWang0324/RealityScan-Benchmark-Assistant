@@ -265,7 +265,6 @@ class BenchmarkRunner:
         pareto_path = generate_pareto_chart(
             summary / "charts" / "pareto_registration_runtime.png",
             project.results,
-            analysis.pareto_experiment_ids,
         )
         if pareto_path:
             chart_paths.append(pareto_path)

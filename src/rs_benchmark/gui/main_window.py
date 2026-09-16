@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QElapsedTimer, Qt, QThread, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QColor, QDesktopServices
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -31,6 +31,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from rs_benchmark.analysis.metric_champions import (
+    CHAMPION_METRICS,
+    parameter_champions,
+)
 from rs_benchmark.gui.experiment_dialog import ExperimentDialog
 from rs_benchmark.gui.localization import (
     OVERLAP_OPTIONS,
@@ -40,6 +44,7 @@ from rs_benchmark.gui.localization import (
     status_label,
 )
 from rs_benchmark.gui.sweep_dialog import ParameterSweepDialog, SweepPreviewDialog
+from rs_benchmark.gui.time_estimate import ProcessingTimeEstimator, format_duration
 from rs_benchmark.gui.workers import BenchmarkWorker
 from rs_benchmark.models import (
     SWEEP_CONFIRM_THRESHOLD,
@@ -96,6 +101,9 @@ class MainWindow(QMainWindow):
         self.current_project: BenchmarkProject | None = None
         self._close_when_finished = False
         self._elapsed = QElapsedTimer()
+        self._time_estimator = ProcessingTimeEstimator()
+        self._estimate_cancelled = False
+        self._estimate_finished = False
         self.sweep_definitions: list[dict[str, object]] = []
         self._elapsed_timer = QTimer(self)
         self._elapsed_timer.timeout.connect(self._update_elapsed)
@@ -258,9 +266,12 @@ class MainWindow(QMainWindow):
         self.progress_bar.setRange(0, 100)
         self.elapsed_label = QLabel("經過時間：00:00:00")
         self.elapsed_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.estimated_time_label = QLabel("預估剩餘時間：尚無足夠資料")
+        self.estimated_time_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.progress_label)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.elapsed_label)
+        layout.addWidget(self.estimated_time_label)
         return widget
 
     def _results_tab(self) -> QWidget:
@@ -287,7 +298,7 @@ class MainWindow(QMainWindow):
         self.result_filter_combo.addItem("全部", "all")
         self.result_filter_combo.addItem("僅成功", "successful")
         self.result_filter_combo.addItem("僅失敗", "failed")
-        self.result_filter_combo.addItem("僅 Pareto-efficient", "pareto")
+        self.result_filter_combo.addItem("Pareto 分析：各指標第一名", "pareto")
         self.result_filter_combo.currentIndexChanged.connect(self._refresh_results)
         actions.addWidget(self.result_filter_combo)
         self.open_output_button = QPushButton("開啟輸出資料夾")
@@ -547,6 +558,10 @@ class MainWindow(QMainWindow):
         self.cancel_button.setEnabled(True)
         self.progress_bar.setValue(0)
         self.progress_label.setText("正在準備效能測試…")
+        self._time_estimator.reset(len(project.enabled_experiments) * project.repeat_count)
+        self._estimate_cancelled = False
+        self._estimate_finished = False
+        self.estimated_time_label.setText("預估剩餘時間：尚無足夠資料")
         self._elapsed.start()
         self._elapsed_timer.start(1_000)
         self.thread = QThread(self)
@@ -566,8 +581,11 @@ class MainWindow(QMainWindow):
             self.worker.cancel()
             self.cancel_button.setEnabled(False)
             self.progress_label.setText("已要求取消；目前實驗結束後將停止後續佇列。")
+            self._estimate_cancelled = True
+            self.estimated_time_label.setText("預估剩餘時間：已停止預估")
 
     def _benchmark_progress(self, progress: BenchmarkProgress) -> None:
+        self._time_estimator.observe(progress, self._elapsed.elapsed())
         phase = "執行中" if progress.phase == "RUNNING" else "已完成"
         repeat = (
             f"（第 {progress.repeat_index} / {progress.repeat_count} 次）"
@@ -578,6 +596,7 @@ class MainWindow(QMainWindow):
             f"{progress.experiment_name}{repeat} — {phase}"
         )
         self.progress_bar.setValue(progress.percent)
+        self._update_estimated_time()
         for row in range(self.experiment_table.rowCount()):
             if self.experiment_table.item(row, 1).text() == progress.experiment_name:
                 self.experiment_table.item(row, 6).setText(phase)
@@ -585,14 +604,18 @@ class MainWindow(QMainWindow):
 
     def _benchmark_completed(self, project: BenchmarkProject) -> None:
         self.current_project = project
+        self._estimate_finished = True
         if project.status.value != "CANCELLED":
             self.progress_bar.setValue(100)
         self.progress_label.setText(f"效能測試狀態：{benchmark_status_label(project.status)}")
+        self.estimated_time_label.setText("預估剩餘時間：已結束")
         self._show_results(project)
         self.tabs.setCurrentIndex(1)
 
     def _benchmark_failed(self, message: str) -> None:
+        self._estimate_finished = True
         self.progress_label.setText("效能測試無法啟動")
+        self.estimated_time_label.setText("預估剩餘時間：已停止預估")
         QMessageBox.warning(self, "效能測試失敗", localize_error_message(message))
 
     def _thread_finished(self) -> None:
@@ -616,8 +639,11 @@ class MainWindow(QMainWindow):
         configs_by_id = {
             experiment.experiment_id: experiment for experiment in project.enabled_experiments
         }
-        pareto_ids = self._pareto_ids(project)
         selected_filter = self.result_filter_combo.currentData()
+        self.result_table.horizontalHeaderItem(1).setText("重複次序")
+        if selected_filter == "pareto":
+            self._show_metric_champions(project, configs_by_id)
+            return
         visible_results = [
             result for result in project.results
             if selected_filter == "all"
@@ -628,10 +654,6 @@ class MainWindow(QMainWindow):
             or (
                 selected_filter == "failed"
                 and result.status in {ExperimentStatus.FAILED, ExperimentStatus.TIMEOUT}
-            )
-            or (
-                selected_filter == "pareto"
-                and (result.experiment_id or result.experiment_name) in pareto_ids
             )
         ]
         for result in visible_results:
@@ -698,21 +720,60 @@ class MainWindow(QMainWindow):
         ):
             button.setEnabled(project.run_directory is not None)
 
+    def _show_metric_champions(
+        self,
+        project: BenchmarkProject,
+        configs_by_id: dict[str, ExperimentConfig],
+    ) -> None:
+        self.result_table.horizontalHeaderItem(1).setText("有效次數")
+        source_labels = {"MANUAL": "手動", "SWEEP": "參數掃描", "BASELINE": "基準"}
+        for champion in parameter_champions(project.results):
+            config = configs_by_id.get(champion.experiment_id)
+            row = self.result_table.rowCount()
+            self.result_table.insertRow(row)
+            context = (
+                champion.experiment_name,
+                f"{champion.successful_count} / {champion.total_count}",
+                source_labels.get(config.experiment_role, config.experiment_role)
+                if config else "未知",
+                config.sweep_id if config and config.sweep_id else "—",
+                "成功",
+            )
+            for column, value in enumerate(context):
+                self.result_table.setItem(row, column, SortableTableWidgetItem(value, value))
+            for column, metric in enumerate(CHAMPION_METRICS, start=5):
+                value = champion.values[metric.key]
+                displayed = value * 100 if metric.key == "registration_rate" and value is not None else value
+                suffix = "%" if metric.key == "registration_rate" else (
+                    " px" if metric.key == "mean_reprojection_error" else
+                    " 秒" if metric.key == "runtime_seconds" else ""
+                )
+                decimals = 3 if metric.key == "mean_reprojection_error" else 1
+                label = self._display(displayed, suffix, decimals)
+                winning = metric.key in champion.winning_metrics
+                item = SortableTableWidgetItem(
+                    f"★ {label}" if winning else label,
+                    displayed if displayed is not None else float("inf"),
+                )
+                if winning:
+                    item.setBackground(QColor("#FFF1C2"))
+                    item.setToolTip(f"{metric.label}第一名（成功執行的平均值）")
+                self.result_table.setItem(row, column, item)
+        self.comparison_label.setText(
+            "每組數值為成功執行的平均值；★ 表示該指標第一名。"
+            "並列時依註冊率、執行時間、元件數決勝。"
+            if self.result_table.rowCount() else "沒有可比較的成功結果。"
+        )
+        self.result_table.setSortingEnabled(True)
+        for button in (
+            self.open_output_button, self.export_button, self.charts_button,
+            self.open_report_button, self.package_button,
+        ):
+            button.setEnabled(project.run_directory is not None)
+
     def _refresh_results(self) -> None:
         if self.current_project and self.current_project.results:
             self._show_results(self.current_project)
-
-    @staticmethod
-    def _pareto_ids(project: BenchmarkProject) -> set[str]:
-        if not project.run_directory:
-            return set()
-        path = project.run_directory / "summary" / "analysis.json"
-        if not path.is_file():
-            return set()
-        try:
-            return set(json.loads(path.read_text(encoding="utf-8"))["pareto_experiment_ids"])
-        except (OSError, ValueError, KeyError, TypeError):
-            return set()
 
     def _set_comparison(
         self, source: BenchmarkProject | list[ExperimentResult]
@@ -848,6 +909,25 @@ class MainWindow(QMainWindow):
         hours, remainder = divmod(elapsed, 3_600)
         minutes, seconds = divmod(remainder, 60)
         self.elapsed_label.setText(f"經過時間：{hours:02d}:{minutes:02d}:{seconds:02d}")
+        self._update_estimated_time()
+
+    def _update_estimated_time(self, now_ms: int | None = None) -> None:
+        if self._estimate_cancelled or self._estimate_finished or self.thread is None:
+            return
+        if self.current_project and self.current_project.dry_run:
+            self.estimated_time_label.setText("預估剩餘時間：試執行不適用")
+            return
+        if self._time_estimator.completed >= self._time_estimator.total:
+            self.estimated_time_label.setText("預估剩餘時間：正在整理結果…")
+            return
+        remaining = self._time_estimator.remaining_seconds(
+            self._elapsed.elapsed() if now_ms is None else now_ms
+        )
+        if remaining is None:
+            label = "尚無足夠資料" if self._time_estimator.completed == 0 else "無法準確預估"
+        else:
+            label = f"約 {format_duration(remaining)}（依已完成實驗估算）"
+        self.estimated_time_label.setText(f"預估剩餘時間：{label}")
 
     def _open_output_folder(self) -> None:
         if self.current_project and self.current_project.run_directory:

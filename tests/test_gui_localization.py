@@ -5,12 +5,14 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication
 
 from rs_benchmark.gui.localization import localize_error_message, status_label
 from rs_benchmark.gui.main_window import MainWindow
 from rs_benchmark.gui.sweep_dialog import ParameterSweepDialog
-from rs_benchmark.models import ExperimentResult, ExperimentStatus
+from rs_benchmark.models import BenchmarkProject, ExperimentResult, ExperimentStatus
+from rs_benchmark.services.benchmark_runner import BenchmarkProgress
 
 _CHINESE_CHARACTER = re.compile(r"[\u3400-\u9fff]")
 _FIRST_ARGUMENT_UI_CALLS = {
@@ -64,6 +66,7 @@ def test_internal_values_use_chinese_display_labels() -> None:
     assert window.experiment_table.rowCount() == 3
     assert window.repeat_count_spin.value() == 1
     assert window.repeat_summary_label.text() == "總執行次數：3 套參數 × 1 次 = 3 次"
+    assert window.estimated_time_label.text() == "預估剩餘時間：尚無足夠資料"
     window.repeat_count_spin.setValue(4)
     assert window._project().repeat_count == 4
     assert window.repeat_summary_label.text() == "總執行次數：3 套參數 × 4 次 = 12 次"
@@ -71,6 +74,29 @@ def test_internal_values_use_chinese_display_labels() -> None:
     window.experiment_table.selectRow(0)
     window._duplicate_experiment()
     assert window.experiment_table.item(3, 1).text() == "預設 副本"
+    window.close()
+    assert app is not None
+
+
+def test_remaining_time_label_is_traditional_chinese_and_updates_with_progress() -> None:
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    window.thread = QThread(window)
+    window._time_estimator.reset(3)
+    window._time_estimator.observe(BenchmarkProgress(1, 3, "預設", "RUNNING"), 0)
+    window._update_estimated_time(5_000)
+    assert window.estimated_time_label.text() == "預估剩餘時間：尚無足夠資料"
+
+    window._time_estimator.observe(BenchmarkProgress(1, 3, "預設", "FINISHED"), 20_000)
+    window._update_estimated_time(20_000)
+    assert window.estimated_time_label.text() == (
+        "預估剩餘時間：約 00:00:40（依已完成實驗估算）"
+    )
+    window._time_estimator.observe(BenchmarkProgress(2, 3, "預設", "RUNNING"), 20_000)
+    window._update_estimated_time(40_000)
+    assert window.estimated_time_label.text() == "預估剩餘時間：無法準確預估"
+
+    window.thread = None
     window.close()
     assert app is not None
 
@@ -109,6 +135,43 @@ def test_result_summary_is_traditional_chinese() -> None:
     assert "執行時間：2.5 秒" in summary
     assert "Status:" not in summary
     assert "Images:" not in summary
+
+
+def test_pareto_filter_shows_component_runtime_tradeoff_and_names_criteria(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    project = BenchmarkProject(name="測試", image_folder=tmp_path)
+    project.results = [
+        ExperimentResult(
+            experiment_name="快速設定", experiment_id="same",
+            status=ExperimentStatus.SUCCESS, total_images=68, registered_images=68,
+            component_count=2, runtime_seconds=17.0, repeat_index=1,
+        ),
+        ExperimentResult(
+            experiment_name="快速設定", experiment_id="same",
+            status=ExperimentStatus.SUCCESS, total_images=68, registered_images=68,
+            component_count=2, runtime_seconds=16.4, repeat_index=2,
+        ),
+        ExperimentResult(
+            experiment_name="單一元件", experiment_id="other",
+            status=ExperimentStatus.SUCCESS, total_images=68, registered_images=68,
+            component_count=1, runtime_seconds=16.8,
+        ),
+    ]
+    window.result_filter_combo.setCurrentIndex(
+        window.result_filter_combo.findData("pareto")
+    )
+    window._show_results(project)
+
+    assert window.result_filter_combo.currentText() == "僅 Pareto 前緣（註冊率／時間／元件數）"
+    assert window.result_table.rowCount() == 2
+    assert window.result_table.item(0, 7).text() == "1"
+    assert {window.result_table.item(row, 7).text() for row in range(2)} == {"1", "2"}
+    assert {window.result_table.item(row, 11).text() for row in range(2)} == {
+        "16.4 秒", "16.8 秒",
+    }
+    window.close()
+    assert app is not None
 
 
 def test_repeated_results_show_stability_summary() -> None:
