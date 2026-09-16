@@ -35,6 +35,7 @@ from rs_benchmark.analysis.metric_champions import (
     CHAMPION_METRICS,
     parameter_champions,
 )
+from rs_benchmark.gui.chart_dialog import ChartDialog
 from rs_benchmark.gui.experiment_dialog import ExperimentDialog
 from rs_benchmark.gui.localization import (
     OVERLAP_OPTIONS,
@@ -948,13 +949,13 @@ class MainWindow(QMainWindow):
             shutil.copy2(source, selected)
 
     def _view_charts(self) -> None:
-        if not self.current_project or not self.current_project.run_directory:
+        if not self.current_project:
             return
-        charts = sorted((self.current_project.run_directory / "summary" / "charts").glob("*.png"))
-        if charts:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(str(charts[0])))
-        else:
-            QMessageBox.information(self, "沒有可用圖表", "目前結果沒有足夠的有效數值可產生圖表。")
+        if not self.current_project.enabled_experiments:
+            QMessageBox.information(self, "沒有可用圖表", "目前沒有可繪製的參數組合。")
+            return
+        dialog = ChartDialog(self.current_project, self)
+        dialog.exec()
 
     def _open_report(self) -> None:
         if not self.current_project or not self.current_project.run_directory:

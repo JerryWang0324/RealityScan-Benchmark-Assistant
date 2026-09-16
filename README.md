@@ -186,8 +186,11 @@ useful for checking quoting, paths, queue order, and parameter mappings before a
 
 The GUI result table shows experiment status, registered images, registration rate, component count,
 largest component camera count, sparse point count, mean reprojection error, and runtime. Missing
-values are displayed as `N/A`. Actions open the output folder, copy the CSV to another location, or
-open the first generated chart.
+values are displayed as `N/A`. Actions open the output folder or copy the CSV to another location.
+`檢視圖表` opens a chart window where you can select result metrics for the vertical axis. Each
+selected metric gets its own tab, with every enabled parameter combination on the horizontal axis.
+Repeated successful runs of the same combination are averaged; combinations without a valid value
+are retained and marked `無資料`.
 
 The `Pareto 分析：各指標第一名` result filter groups repeated runs by parameter configuration and
 uses each group's mean from successful runs. It selects one first-place group for each of the seven

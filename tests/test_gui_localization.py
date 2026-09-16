@@ -8,10 +8,16 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QApplication
 
+from rs_benchmark.gui.chart_dialog import ChartDialog, parameter_combinations
 from rs_benchmark.gui.localization import localize_error_message, status_label
 from rs_benchmark.gui.main_window import MainWindow
 from rs_benchmark.gui.sweep_dialog import ParameterSweepDialog
-from rs_benchmark.models import BenchmarkProject, ExperimentResult, ExperimentStatus
+from rs_benchmark.models import (
+    BenchmarkProject,
+    ExperimentConfig,
+    ExperimentResult,
+    ExperimentStatus,
+)
 from rs_benchmark.services.benchmark_runner import BenchmarkProgress
 
 _CHINESE_CHARACTER = re.compile(r"[\u3400-\u9fff]")
@@ -255,3 +261,80 @@ def test_static_gui_text_uses_chinese_as_primary_language() -> None:
                 violations.append(f"{source_path.name}:{call.lineno}：{text}")
 
     assert not violations, "UI 靜態文字必須以中文為主：\n" + "\n".join(violations)
+
+
+def test_chart_dialog_groups_every_parameter_combination_and_selects_metrics(
+    tmp_path: Path,
+) -> None:
+    app = QApplication.instance() or QApplication([])
+    configs = [
+        ExperimentConfig(name="甲", experiment_id="a", max_features_per_image=20_000),
+        ExperimentConfig(name="甲副本", experiment_id="a2", max_features_per_image=20_000),
+        ExperimentConfig(name="乙", experiment_id="b", max_features_per_image=40_000),
+        ExperimentConfig(name="丙", experiment_id="c", max_features_per_image=80_000),
+    ]
+    project = BenchmarkProject(name="測試", image_folder=tmp_path, experiments=configs)
+    project.results = [
+        ExperimentResult(
+            experiment_name="甲", experiment_id="a", status=ExperimentStatus.SUCCESS,
+            total_images=10, registered_images=8, runtime_seconds=10,
+        ),
+        ExperimentResult(
+            experiment_name="甲", experiment_id="a", status=ExperimentStatus.SUCCESS,
+            total_images=10, registered_images=10, runtime_seconds=12,
+        ),
+        ExperimentResult(
+            experiment_name="甲副本", experiment_id="a2", status=ExperimentStatus.SUCCESS,
+            total_images=10, registered_images=9, runtime_seconds=11,
+        ),
+        ExperimentResult(
+            experiment_name="乙", experiment_id="b", status=ExperimentStatus.FAILED,
+            total_images=10, registered_images=1, runtime_seconds=2,
+        ),
+    ]
+    combinations = parameter_combinations(project)
+    assert len(combinations) == 3
+    assert "特徵：20,000" in combinations[0].label
+    assert combinations[0].values["registration_rate"] == 90
+    assert combinations[0].values["runtime_seconds"] == 11
+    assert combinations[1].values["registration_rate"] is None
+    assert combinations[2].values["registration_rate"] is None
+
+    dialog = ChartDialog(project)
+    assert dialog.windowTitle() == "參數組合結果圖表"
+    assert dialog.metric_checks["registration_rate"].text() == "註冊率"
+    assert dialog.metric_checks["registration_rate"].isChecked()
+    assert dialog.chart_tabs.count() == 2
+    dialog.metric_checks["registration_rate"].setChecked(False)
+    dialog.metric_checks["runtime_seconds"].setChecked(False)
+    dialog.metric_checks["registered_images"].setChecked(True)
+    dialog.draw_charts()
+    assert dialog.chart_tabs.count() == 1
+    assert dialog.chart_tabs.tabText(0) == "已註冊影像數"
+    canvas = dialog.chart_tabs.widget(0).widget()
+    axis = canvas.figure.axes[0]
+    assert len(axis.get_xticklabels()) == 3
+    assert "特徵：80,000" in axis.get_xticklabels()[2].get_text()
+    assert axis.get_ylabel() == "已註冊影像數（張）"
+    dialog.close()
+    assert app is not None
+
+
+def test_view_charts_opens_selection_dialog(tmp_path: Path, monkeypatch) -> None:
+    app = QApplication.instance() or QApplication([])
+    window = MainWindow()
+    project = BenchmarkProject(
+        name="測試", image_folder=tmp_path,
+        experiments=[ExperimentConfig(name="甲", experiment_id="a")],
+    )
+    project.results = [ExperimentResult(
+        experiment_name="甲", experiment_id="a", status=ExperimentStatus.SUCCESS,
+        total_images=10, registered_images=9,
+    )]
+    window.current_project = project
+    opened = []
+    monkeypatch.setattr(ChartDialog, "exec", lambda dialog: opened.append(dialog.windowTitle()))
+    window._view_charts()
+    assert opened == ["參數組合結果圖表"]
+    window.close()
+    assert app is not None
